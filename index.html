@@ -1,0 +1,1700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PPREV — Privacy-Preserving Real Estate Verification</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800;900&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════ DESIGN TOKENS ═══════════════════════ */
+:root {
+  --bg-void: #080B10;
+  --bg-primary: #0F1419;
+  --bg-surface: #151B23;
+  --bg-card: #1A2030;
+  --bg-card-hover: #1F2740;
+  --bg-elevated: #242D3D;
+  --border-dim: rgba(255,255,255,0.04);
+  --border-subtle: rgba(255,255,255,0.07);
+  --border-medium: rgba(255,255,255,0.12);
+  --text-primary: #E8EAED;
+  --text-secondary: #9AA0A6;
+  --text-tertiary: #5F6B7A;
+  --landlord: #4CAF50;
+  --landlord-dim: rgba(76,175,80,0.12);
+  --landlord-glow: rgba(76,175,80,0.3);
+  --tenant: #5B9BD5;
+  --tenant-dim: rgba(91,155,213,0.12);
+  --tenant-glow: rgba(91,155,213,0.3);
+  --notary: #FFD54F;
+  --notary-dim: rgba(255,213,79,0.12);
+  --contract: #FF8A80;
+  --contract-dim: rgba(255,138,128,0.12);
+  --success: #00E676;
+  --warning: #FFD740;
+  --error: #FF5252;
+  --success-dim: rgba(0,230,118,0.1);
+  --warning-dim: rgba(255,215,64,0.1);
+  --error-dim: rgba(255,82,82,0.1);
+  --font-display: 'Outfit', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --shadow-card: 0 2px 12px rgba(0,0,0,0.3), 0 0 0 1px var(--border-dim);
+  --shadow-elevated: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px var(--border-subtle);
+  --transition-fast: 150ms ease;
+  --transition-med: 300ms cubic-bezier(0.4,0,0.2,1);
+  --transition-slow: 500ms cubic-bezier(0.4,0,0.2,1);
+  --glass-bg: rgba(26,32,48,0.7);
+  --glass-border: rgba(255,255,255,0.06);
+}
+/* ═══════════════════════ RESET & BASE ═══════════════════════ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased}
+body{
+  font-family:var(--font-body);
+  background:var(--bg-void);
+  color:var(--text-primary);
+  line-height:1.6;
+  min-height:100vh;
+  overflow-x:hidden;
+}
+/* Noise overlay */
+body::before{
+  content:'';position:fixed;inset:0;z-index:9999;pointer-events:none;
+  opacity:0.02;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+a{color:inherit;text-decoration:none}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,select,textarea{font-family:inherit;color:inherit;background:var(--bg-elevated);border:1px solid var(--border-medium);border-radius:var(--radius-sm);padding:10px 14px;font-size:0.9rem;outline:none;transition:border var(--transition-fast)}
+input:focus,select:focus,textarea:focus{border-color:var(--tenant)}
+textarea{resize:vertical;min-height:80px}
+/* ═══════════════════════ UTILITY ═══════════════════════ */
+.hidden{display:none!important}
+.fade-in{animation:fadeIn var(--transition-slow) forwards}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes glowPulse{0%,100%{box-shadow:0 0 20px rgba(91,155,213,0.1)}50%{box-shadow:0 0 40px rgba(91,155,213,0.2)}}
+@keyframes checkIn{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes progressFill{from{width:0}to{width:var(--target-width)}}
+@keyframes scanline{0%{transform:translateY(-100%)}100%{transform:translateY(100%)}}
+@keyframes borderGlow{0%,100%{border-color:var(--border-subtle)}50%{border-color:var(--tenant)}}
+
+/* ═══════════════════════ SCROLLBAR ═══════════════════════ */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border-medium);border-radius:3px}
+
+/* ═══════════════════════ NAVBAR ═══════════════════════ */
+.navbar{
+  position:fixed;top:0;left:0;right:0;z-index:1000;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 32px;height:64px;
+  background:rgba(8,11,16,0.85);
+  backdrop-filter:blur(20px) saturate(1.2);
+  border-bottom:1px solid var(--border-dim);
+}
+.nav-logo{
+  display:flex;align-items:center;gap:10px;
+  font-family:var(--font-display);font-weight:800;font-size:1.15rem;
+  letter-spacing:-0.02em;
+}
+.nav-logo .logo-icon{
+  width:32px;height:32px;border-radius:8px;
+  background:linear-gradient(135deg,var(--tenant),var(--landlord));
+  display:flex;align-items:center;justify-content:center;
+  font-size:0.75rem;font-weight:700;color:#fff;
+}
+.nav-links{display:flex;gap:4px}
+.nav-links a{
+  padding:8px 16px;border-radius:var(--radius-sm);
+  font-size:0.85rem;font-weight:500;color:var(--text-secondary);
+  transition:all var(--transition-fast);
+}
+.nav-links a:hover,.nav-links a.active{color:var(--text-primary);background:var(--bg-elevated)}
+.nav-right{display:flex;align-items:center;gap:12px}
+.role-switch{
+  display:flex;border-radius:var(--radius-sm);overflow:hidden;
+  border:1px solid var(--border-medium);
+}
+.role-switch button{
+  padding:6px 14px;font-size:0.78rem;font-weight:600;
+  transition:all var(--transition-fast);
+  font-family:var(--font-mono);
+}
+.role-switch button.active-role-landlord{background:var(--landlord-dim);color:var(--landlord)}
+.role-switch button.active-role-tenant{background:var(--tenant-dim);color:var(--tenant)}
+.wallet-btn{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 16px;border-radius:var(--radius-sm);
+  background:var(--bg-elevated);border:1px solid var(--border-medium);
+  font-size:0.82rem;font-family:var(--font-mono);
+  transition:all var(--transition-fast);
+}
+.wallet-btn:hover{border-color:var(--tenant);background:var(--bg-card-hover)}
+.wallet-btn .wallet-dot{width:8px;height:8px;border-radius:50%;background:var(--success)}
+.wallet-btn .wallet-bal{color:var(--text-secondary);font-size:0.75rem}
+
+/* ═══════════════════════ MAIN LAYOUT ═══════════════════════ */
+.main{padding-top:64px;min-height:100vh}
+.page{display:none;animation:fadeIn 0.4s ease forwards}
+.page.active{display:block}
+.container{max-width:1200px;margin:0 auto;padding:40px 32px}
+
+/* ═══════════════════════ STATUS BADGES ═══════════════════════ */
+.badge{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:4px 12px;border-radius:20px;
+  font-size:0.72rem;font-weight:600;font-family:var(--font-mono);
+  text-transform:uppercase;letter-spacing:0.05em;
+}
+.badge::before{content:'';width:6px;height:6px;border-radius:50%}
+.badge-active{background:var(--landlord-dim);color:var(--landlord)}.badge-active::before{background:var(--landlord)}
+.badge-locked{background:var(--warning-dim);color:var(--warning)}.badge-locked::before{background:var(--warning);animation:pulse 1.5s infinite}
+.badge-settled{background:var(--tenant-dim);color:var(--tenant)}.badge-settled::before{background:var(--tenant)}
+.badge-expired{background:rgba(100,100,120,0.15);color:var(--text-tertiary)}.badge-expired::before{background:var(--text-tertiary)}
+.badge-pending{background:var(--notary-dim);color:var(--notary)}.badge-pending::before{background:var(--notary);animation:pulse 1.2s infinite}
+.badge-dispute{background:var(--error-dim);color:var(--error)}.badge-dispute::before{background:var(--error)}
+.badge-rent{background:var(--landlord-dim);color:var(--landlord)}
+.badge-sale{background:var(--contract-dim);color:var(--contract)}
+
+/* ═══════════════════════ BUTTONS ═══════════════════════ */
+.btn{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:10px 22px;border-radius:var(--radius-sm);
+  font-size:0.88rem;font-weight:600;font-family:var(--font-display);
+  transition:all var(--transition-fast);
+  border:1px solid transparent;
+}
+.btn-primary{
+  background:linear-gradient(135deg,var(--tenant),#4A8BC2);
+  color:#fff;
+}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 4px 20px var(--tenant-glow)}
+.btn-landlord{background:linear-gradient(135deg,var(--landlord),#3D8B40);color:#fff}
+.btn-landlord:hover{transform:translateY(-1px);box-shadow:0 4px 20px var(--landlord-glow)}
+.btn-outline{border:1px solid var(--border-medium);color:var(--text-secondary)}
+.btn-outline:hover{border-color:var(--text-secondary);color:var(--text-primary);background:var(--bg-elevated)}
+.btn-danger{background:var(--error-dim);color:var(--error);border:1px solid rgba(255,82,82,0.2)}
+.btn-danger:hover{background:rgba(255,82,82,0.2)}
+.btn-sm{padding:6px 14px;font-size:0.78rem}
+.btn-ghost{color:var(--text-secondary);padding:6px 12px;font-size:0.82rem}
+.btn-ghost:hover{color:var(--text-primary);background:var(--bg-elevated);border-radius:var(--radius-sm)}
+
+/* ═══════════════════════ CARDS ═══════════════════════ */
+.card{
+  background:var(--glass-bg);
+  border:1px solid var(--glass-border);
+  border-radius:var(--radius-lg);
+  backdrop-filter:blur(12px);
+  transition:all var(--transition-med);
+}
+.card:hover{border-color:var(--border-medium);transform:translateY(-2px);box-shadow:var(--shadow-elevated)}
+
+/* ═══════════════════════ TABLES ═══════════════════════ */
+.table-wrap{overflow-x:auto;border-radius:var(--radius-lg);border:1px solid var(--border-dim)}
+table{width:100%;border-collapse:collapse}
+th{
+  padding:12px 16px;text-align:left;
+  font-size:0.72rem;font-weight:600;font-family:var(--font-mono);
+  text-transform:uppercase;letter-spacing:0.08em;
+  color:var(--text-tertiary);background:var(--bg-surface);
+  border-bottom:1px solid var(--border-dim);
+}
+td{
+  padding:14px 16px;font-size:0.88rem;
+  border-bottom:1px solid var(--border-dim);
+}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,0.02)}
+.mono{font-family:var(--font-mono);font-size:0.82rem}
+
+/* ═══════════════════════ TABS ═══════════════════════ */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border-dim);margin-bottom:32px}
+.tab{
+  padding:12px 20px;font-size:0.88rem;font-weight:500;
+  color:var(--text-tertiary);position:relative;
+  transition:all var(--transition-fast);
+}
+.tab:hover{color:var(--text-secondary)}
+.tab.active{color:var(--text-primary)}
+.tab.active::after{
+  content:'';position:absolute;bottom:-1px;left:0;right:0;height:2px;
+  background:var(--tenant);border-radius:1px;
+}
+
+/* ═══════════════════════ STEPPER ═══════════════════════ */
+.stepper-header{
+  display:flex;align-items:center;gap:0;margin-bottom:40px;
+  padding:20px 24px;background:var(--bg-surface);border-radius:var(--radius-lg);
+  border:1px solid var(--border-dim);
+}
+.step-indicator{
+  display:flex;align-items:center;gap:10px;flex:1;
+  position:relative;
+}
+.step-indicator:not(:last-child)::after{
+  content:'';flex:1;height:2px;background:var(--border-dim);
+  margin:0 8px;transition:background var(--transition-med);
+}
+.step-indicator:not(:last-child).done::after{background:var(--success)}
+.step-num{
+  width:32px;height:32px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-mono);font-size:0.78rem;font-weight:700;
+  background:var(--bg-elevated);border:2px solid var(--border-medium);
+  transition:all var(--transition-med);flex-shrink:0;
+}
+.step-indicator.active .step-num{border-color:var(--tenant);color:var(--tenant);background:var(--tenant-dim)}
+.step-indicator.done .step-num{border-color:var(--success);color:var(--success);background:var(--success-dim)}
+.step-label{font-size:0.78rem;font-weight:500;color:var(--text-tertiary);white-space:nowrap}
+.step-indicator.active .step-label{color:var(--text-primary)}
+.step-indicator.done .step-label{color:var(--success)}
+.step-content{
+  padding:32px;background:var(--bg-surface);border-radius:var(--radius-lg);
+  border:1px solid var(--border-dim);min-height:300px;
+}
+
+/* ═══════════════════════ PROOF SIMULATION ═══════════════════════ */
+.sim-terminal{
+  background:var(--bg-void);border-radius:var(--radius-md);
+  padding:24px;font-family:var(--font-mono);font-size:0.82rem;
+  border:1px solid var(--border-dim);position:relative;overflow:hidden;
+}
+.sim-terminal::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--tenant),transparent);
+  opacity:0.4;
+}
+.sim-line{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 0;opacity:0;transform:translateX(-10px);
+  transition:all 0.4s ease;
+}
+.sim-line.visible{opacity:1;transform:translateX(0)}
+.sim-line .sim-icon{
+  width:20px;height:20px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:0.65rem;flex-shrink:0;
+}
+.sim-line .sim-icon.pending{border:2px solid var(--text-tertiary);animation:spin 1s linear infinite}
+.sim-line .sim-icon.done{background:var(--success-dim);color:var(--success);border:none}
+.sim-line .sim-text{color:var(--text-secondary)}
+.sim-line.visible .sim-text{color:var(--text-primary)}
+.sim-meta{
+  margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim);
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;
+}
+.sim-meta-item{display:flex;gap:8px;font-size:0.78rem}
+.sim-meta-item .label{color:var(--text-tertiary)}
+.sim-meta-item .value{color:var(--notary);word-break:break-all}
+
+/* Progress bar */
+.proof-progress{
+  height:4px;background:var(--bg-void);border-radius:2px;
+  margin:16px 0;overflow:hidden;
+}
+.proof-progress-fill{
+  height:100%;background:linear-gradient(90deg,var(--tenant),var(--success));
+  border-radius:2px;transition:width 0.3s ease;width:0;
+}
+/* Public/Private display */
+.data-row{
+  display:flex;align-items:flex-start;gap:12px;padding:6px 0;
+  font-family:var(--font-mono);font-size:0.8rem;
+}
+.data-label{color:var(--text-tertiary);min-width:90px;flex-shrink:0}
+.data-value{color:var(--text-primary);word-break:break-all}
+.data-value.private{color:var(--error);letter-spacing:2px}
+.data-value.public{color:var(--success)}
+
+/* Verification checklist */
+.verify-list{display:flex;flex-direction:column;gap:10px}
+.verify-item{
+  display:flex;align-items:center;gap:12px;
+  padding:12px 16px;border-radius:var(--radius-sm);
+  background:var(--bg-void);border:1px solid var(--border-dim);
+  opacity:0;transform:translateY(5px);transition:all 0.4s ease;
+}
+.verify-item.visible{opacity:1;transform:translateY(0)}
+.verify-item .v-icon{
+  width:24px;height:24px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:0.7rem;flex-shrink:0;
+}
+.verify-item .v-icon.pass{background:var(--success-dim);color:var(--success)}
+.verify-item .v-icon.fail{background:var(--error-dim);color:var(--error)}
+.verify-item .v-text{font-size:0.88rem}
+
+/* ═══════════════════════ PAGE: LANDING ═══════════════════════ */
+.hero{
+  text-align:center;padding:100px 32px 60px;
+  position:relative;overflow:hidden;
+}
+.hero::before{
+  content:'';position:absolute;top:-200px;left:50%;transform:translateX(-50%);
+  width:800px;height:800px;border-radius:50%;
+  background:radial-gradient(circle,rgba(91,155,213,0.06) 0%,transparent 70%);
+  pointer-events:none;
+}
+.hero-badge{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:6px 16px;border-radius:20px;
+  background:var(--bg-elevated);border:1px solid var(--border-medium);
+  font-size:0.78rem;font-family:var(--font-mono);
+  color:var(--text-secondary);margin-bottom:24px;
+}
+.hero-badge .hb-dot{width:6px;height:6px;border-radius:50%;background:var(--success);animation:pulse 2s infinite}
+.hero h1{
+  font-family:var(--font-display);font-size:3.5rem;font-weight:900;
+  line-height:1.1;letter-spacing:-0.03em;
+  max-width:750px;margin:0 auto 20px;
+  background:linear-gradient(135deg,var(--text-primary) 0%,var(--text-secondary) 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.hero .sub{
+  font-size:1.1rem;color:var(--text-secondary);
+  max-width:580px;margin:0 auto 40px;line-height:1.7;
+}
+.hero-ctas{display:flex;justify-content:center;gap:16px;flex-wrap:wrap}
+.hero-ctas .btn{padding:14px 32px;font-size:0.95rem}
+
+/* How It Works */
+.section-title{
+  font-family:var(--font-display);font-size:0.72rem;font-weight:700;
+  text-transform:uppercase;letter-spacing:0.15em;
+  color:var(--text-tertiary);margin-bottom:12px;
+}
+.section-heading{
+  font-family:var(--font-display);font-size:2rem;font-weight:800;
+  letter-spacing:-0.02em;margin-bottom:48px;
+}
+.how-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-bottom:80px}
+.how-card{
+  padding:32px;border-radius:var(--radius-lg);
+  background:var(--bg-surface);border:1px solid var(--border-dim);
+  text-align:center;transition:all var(--transition-med);
+}
+.how-card:hover{border-color:var(--border-medium);transform:translateY(-4px)}
+.how-card .hc-icon{
+  width:56px;height:56px;border-radius:14px;margin:0 auto 20px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:1.4rem;
+}
+.how-card:nth-child(1) .hc-icon{background:var(--notary-dim);color:var(--notary)}
+.how-card:nth-child(2) .hc-icon{background:var(--tenant-dim);color:var(--tenant)}
+.how-card:nth-child(3) .hc-icon{background:var(--contract-dim);color:var(--contract)}
+.how-card h3{font-family:var(--font-display);font-size:1.15rem;font-weight:700;margin-bottom:10px}
+.how-card p{font-size:0.88rem;color:var(--text-secondary);line-height:1.6}
+.how-arrow{
+  display:flex;align-items:center;justify-content:center;
+  color:var(--text-tertiary);font-size:1.2rem;
+}
+
+/* Use Cases */
+.usecase-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.usecase-card{
+  padding:32px;border-radius:var(--radius-lg);
+  border:1px solid var(--border-dim);position:relative;overflow:hidden;
+}
+.usecase-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:3px;
+}
+.usecase-card.rent{background:linear-gradient(180deg,rgba(76,175,80,0.04),transparent)}
+.usecase-card.rent::before{background:linear-gradient(90deg,var(--landlord),transparent)}
+.usecase-card.sale{background:linear-gradient(180deg,rgba(255,138,128,0.04),transparent)}
+.usecase-card.sale::before{background:linear-gradient(90deg,var(--contract),transparent)}
+.usecase-card h3{font-family:var(--font-display);font-size:1.2rem;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+.usecase-list{list-style:none;display:flex;flex-direction:column;gap:10px}
+.usecase-list li{
+  display:flex;align-items:center;gap:10px;
+  font-size:0.9rem;color:var(--text-secondary);
+}
+.usecase-list li::before{
+  content:'';width:4px;height:4px;border-radius:50%;flex-shrink:0;
+}
+.usecase-card.rent .usecase-list li::before{background:var(--landlord)}
+.usecase-card.sale .usecase-list li::before{background:var(--contract)}
+
+/* ═══════════════════════ PAGE: LISTINGS ═══════════════════════ */
+.filter-bar{
+  display:flex;align-items:center;gap:12px;margin-bottom:32px;
+  padding:16px 20px;background:var(--bg-surface);border-radius:var(--radius-lg);
+  border:1px solid var(--border-dim);flex-wrap:wrap;
+}
+.filter-bar select,.filter-bar input{
+  background:var(--bg-elevated);min-width:140px;
+}
+.filter-bar input[type=text]{flex:1;min-width:200px}
+.listings-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:24px}
+.listing-card{
+  border-radius:var(--radius-lg);overflow:hidden;
+  background:var(--bg-surface);border:1px solid var(--border-dim);
+  transition:all var(--transition-med);cursor:pointer;
+}
+.listing-card:hover{border-color:var(--border-medium);transform:translateY(-3px);box-shadow:var(--shadow-elevated)}
+.listing-img{
+  height:160px;background:var(--bg-elevated);position:relative;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--text-tertiary);font-size:2rem;overflow:hidden;
+}
+.listing-img::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(180deg,transparent 50%,var(--bg-surface));
+}
+.listing-img .type-badge{
+  position:absolute;top:12px;left:12px;z-index:1;
+}
+.listing-img .status-badge{
+  position:absolute;top:12px;right:12px;z-index:1;
+}
+.listing-body{padding:20px}
+.listing-body h3{font-family:var(--font-display);font-size:1.05rem;font-weight:700;margin-bottom:4px}
+.listing-body .listing-price{
+  font-family:var(--font-mono);font-size:1.1rem;font-weight:600;
+  color:var(--tenant);margin-bottom:12px;
+}
+.listing-body .listing-meta{
+  display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;
+}
+.listing-body .listing-meta .meta-tag{
+  padding:3px 8px;border-radius:4px;font-size:0.7rem;
+  font-family:var(--font-mono);background:var(--bg-elevated);
+  color:var(--text-secondary);
+}
+.listing-body .btn{width:100%;justify-content:center}
+
+/* ═══════════════════════ DASHBOARD LAYOUT ═══════════════════════ */
+.dash-header{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:8px;
+}
+.dash-header h2{font-family:var(--font-display);font-size:1.6rem;font-weight:800;letter-spacing:-0.02em}
+.dash-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:32px}
+.stat-card{
+  padding:20px;border-radius:var(--radius-md);
+  background:var(--bg-surface);border:1px solid var(--border-dim);
+}
+.stat-card .stat-label{font-size:0.75rem;color:var(--text-tertiary);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px}
+.stat-card .stat-value{font-family:var(--font-display);font-size:1.5rem;font-weight:700}
+
+/* ═══════════════════════ SETTLEMENT TIMELINE ═══════════════════════ */
+.timeline{
+  display:flex;align-items:center;gap:0;
+  padding:24px 32px;background:var(--bg-surface);border-radius:var(--radius-lg);
+  border:1px solid var(--border-dim);margin-bottom:32px;overflow-x:auto;
+}
+.tl-step{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.tl-step:not(:last-child)::after{
+  content:'';width:60px;height:2px;background:var(--border-dim);margin:0 4px;
+}
+.tl-step.done:not(:last-child)::after{background:var(--success)}
+.tl-step.current:not(:last-child)::after{
+  background:linear-gradient(90deg,var(--notary),var(--border-dim));
+}
+.tl-dot{
+  width:28px;height:28px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:0.65rem;font-weight:700;flex-shrink:0;
+  border:2px solid var(--border-dim);background:var(--bg-void);
+}
+.tl-step.done .tl-dot{border-color:var(--success);color:var(--success);background:var(--success-dim)}
+.tl-step.current .tl-dot{border-color:var(--notary);color:var(--notary);background:var(--notary-dim);animation:pulse 1.5s infinite}
+.tl-info{display:flex;flex-direction:column}
+.tl-name{font-size:0.8rem;font-weight:600}
+.tl-sub{font-size:0.68rem;color:var(--text-tertiary);font-family:var(--font-mono)}
+
+.settle-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:32px}
+.settle-card{
+  padding:24px;border-radius:var(--radius-lg);
+  background:var(--bg-surface);border:1px solid var(--border-dim);
+}
+.settle-card h4{font-family:var(--font-mono);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-bottom:16px}
+.settle-card .big-num{font-family:var(--font-display);font-size:2rem;font-weight:800;margin-bottom:4px}
+.settle-card .settle-detail{font-size:0.85rem;color:var(--text-secondary);display:flex;justify-content:space-between;padding:4px 0}
+.countdown{font-family:var(--font-mono);font-size:2rem;font-weight:700;color:var(--notary)}
+.settle-actions{
+  display:grid;grid-template-columns:1fr 1fr;gap:16px;
+  margin-bottom:32px;
+}
+.settle-action-card{
+  padding:24px;border-radius:var(--radius-lg);
+  background:var(--bg-surface);border:1px solid var(--border-dim);
+}
+.settle-action-card h4{font-size:0.88rem;font-weight:600;margin-bottom:16px}
+.settle-action-card .btn-row{display:flex;gap:10px}
+
+/* ═══════════════════════ PROTOCOL VISUALIZER ═══════════════════════ */
+.viz-container{
+  padding:32px;background:var(--bg-surface);border-radius:var(--radius-lg);
+  border:1px solid var(--border-dim);margin-bottom:24px;
+  position:relative;min-height:420px;
+}
+.viz-actors{position:relative;width:100%;height:360px}
+.viz-actor{
+  position:absolute;padding:12px 20px;border-radius:var(--radius-md);
+  font-size:0.82rem;font-weight:600;font-family:var(--font-mono);
+  text-align:center;transition:all var(--transition-med);
+  border:2px solid transparent;z-index:2;
+}
+.viz-actor.highlight{transform:scale(1.08);z-index:3}
+.viz-actor.a-tenant{top:10px;left:50%;transform:translateX(-50%);background:var(--tenant-dim);color:var(--tenant);border-color:var(--tenant)}
+.viz-actor.a-tenant.highlight{transform:translateX(-50%) scale(1.08)}
+.viz-actor.a-landlord{bottom:10px;left:50%;transform:translateX(-50%);background:var(--landlord-dim);color:var(--landlord);border-color:var(--landlord)}
+.viz-actor.a-landlord.highlight{transform:translateX(-50%) scale(1.08)}
+.viz-actor.a-edevlet{top:50%;left:10px;transform:translateY(-50%);background:var(--notary-dim);color:var(--notary);border-color:var(--notary)}
+.viz-actor.a-edevlet.highlight{transform:translateY(-50%) scale(1.08)}
+.viz-actor.a-notary{top:50%;right:10px;transform:translateY(-50%);background:var(--warning-dim);color:var(--warning);border-color:var(--warning)}
+.viz-actor.a-notary.highlight{transform:translateY(-50%) scale(1.08)}
+.viz-actor.a-adcontract{top:42%;left:35%;background:var(--contract-dim);color:var(--contract);border-color:var(--contract)}
+.viz-actor.a-escrow{top:42%;left:55%;background:rgba(200,140,255,0.12);color:#C88CFF;border-color:#C88CFF}
+
+.viz-svg{position:absolute;inset:0;z-index:1;pointer-events:none}
+.viz-svg line,.viz-svg path{stroke:var(--border-medium);stroke-width:1.5;fill:none;transition:all var(--transition-med)}
+.viz-svg line.active,.viz-svg path.active{stroke:var(--tenant);stroke-width:2.5;filter:drop-shadow(0 0 4px var(--tenant-glow))}
+.viz-svg marker{fill:var(--border-medium)}
+
+.viz-controls{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 24px;background:var(--bg-surface);border-radius:var(--radius-lg);
+  border:1px solid var(--border-dim);margin-bottom:24px;
+}
+.viz-controls .step-nav{display:flex;align-items:center;gap:12px}
+.viz-controls .step-progress{flex:1;margin:0 20px;height:3px;background:var(--bg-void);border-radius:2px;position:relative}
+.viz-controls .step-progress-fill{height:100%;background:var(--tenant);border-radius:2px;transition:width var(--transition-med)}
+.viz-controls .step-label-txt{font-family:var(--font-mono);font-size:0.82rem;color:var(--text-secondary)}
+
+.viz-detail{
+  padding:24px;background:var(--bg-void);border-radius:var(--radius-lg);
+  border:1px solid var(--border-dim);font-family:var(--font-mono);
+}
+.viz-detail h4{font-size:0.95rem;font-family:var(--font-display);font-weight:700;margin-bottom:12px;color:var(--text-primary)}
+.viz-detail .viz-desc{font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px;font-family:var(--font-body);line-height:1.6}
+.viz-detail .viz-formula{
+  padding:12px 16px;background:var(--bg-surface);border-radius:var(--radius-sm);
+  font-size:0.8rem;color:var(--notary);margin-bottom:12px;
+  border-left:3px solid var(--notary);
+}
+.viz-detail .viz-privacy{display:flex;gap:24px;margin-top:12px}
+.viz-detail .viz-priv-col{flex:1}
+.viz-detail .viz-priv-col h5{font-size:0.7rem;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px}
+.viz-detail .viz-priv-col.priv h5{color:var(--error)}
+.viz-detail .viz-priv-col.pub h5{color:var(--success)}
+.viz-detail .viz-priv-col ul{list-style:none;display:flex;flex-direction:column;gap:4px}
+.viz-detail .viz-priv-col ul li{font-size:0.78rem;color:var(--text-secondary)}
+
+/* ═══════════════════════ FORM GRID ═══════════════════════ */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.form-group{display:flex;flex-direction:column;gap:6px}
+.form-group.full{grid-column:1/-1}
+.form-group label{font-size:0.78rem;font-weight:600;color:var(--text-secondary);font-family:var(--font-mono)}
+.form-group .checkbox-row{display:flex;flex-wrap:wrap;gap:12px;padding:4px 0}
+.form-group .checkbox-row label{display:flex;align-items:center;gap:6px;cursor:pointer;font-family:var(--font-body);font-weight:400}
+.form-group .checkbox-row input[type=checkbox]{width:16px;height:16px;accent-color:var(--tenant)}
+.form-group .radio-row{display:flex;gap:16px}
+.form-group .radio-row label{display:flex;align-items:center;gap:6px;cursor:pointer;font-family:var(--font-body);font-weight:400}
+.form-group .radio-row input[type=radio]{accent-color:var(--tenant)}
+.step-footer{display:flex;justify-content:flex-end;gap:12px;margin-top:24px}
+
+/* ═══════════════════════ TOAST ═══════════════════════ */
+.toast-container{position:fixed;bottom:24px;right:24px;z-index:10000;display:flex;flex-direction:column;gap:8px}
+.toast{
+  padding:14px 20px;border-radius:var(--radius-md);
+  font-size:0.85rem;font-weight:500;
+  background:var(--bg-elevated);border:1px solid var(--border-medium);
+  box-shadow:var(--shadow-elevated);
+  animation:slideUp 0.3s ease;display:flex;align-items:center;gap:10px;
+  max-width:360px;
+}
+.toast.success{border-left:3px solid var(--success)}
+.toast.warning{border-left:3px solid var(--warning)}
+.toast.error{border-left:3px solid var(--error)}
+
+/* ═══════════════════════ RESPONSIVE ═══════════════════════ */
+@media(max-width:768px){
+  .hero h1{font-size:2.2rem}
+  .how-grid{grid-template-columns:1fr}
+  .usecase-grid{grid-template-columns:1fr}
+  .listings-grid{grid-template-columns:1fr}
+  .form-grid{grid-template-columns:1fr}
+  .settle-grid{grid-template-columns:1fr}
+  .settle-actions{grid-template-columns:1fr}
+  .navbar{padding:0 16px}
+  .nav-links{display:none}
+  .container{padding:24px 16px}
+  .stepper-header{flex-wrap:wrap;gap:8px}
+  .step-label{display:none}
+  .viz-actors{height:300px}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════ NAVBAR ═══════════════════════ -->
+<nav class="navbar">
+  <a href="#home" class="nav-logo">
+    <div class="logo-icon">PP</div>
+    <span>PPREV</span>
+  </a>
+  <div class="nav-links">
+    <a href="#home" class="active" data-nav="home">Home</a>
+    <a href="#listings" data-nav="listings">Listings</a>
+    <a href="#dashboard" data-nav="dashboard">Dashboard</a>
+    <a href="#visualizer" data-nav="visualizer">Visualizer</a>
+  </div>
+  <div class="nav-right">
+    <div class="role-switch">
+      <button class="active-role-landlord" onclick="switchRole('landlord')">Landlord</button>
+      <button onclick="switchRole('tenant')">Tenant</button>
+    </div>
+    <button class="wallet-btn" onclick="toggleWallet()">
+      <span class="wallet-dot"></span>
+      <span class="wallet-addr">0x9c2f...3a7B</span>
+      <span class="wallet-bal">10 ETH</span>
+    </button>
+  </div>
+</nav>
+
+<!-- ═══════════════════════ MAIN ═══════════════════════ -->
+<main class="main">
+  <!-- TOAST CONTAINER -->
+  <div class="toast-container" id="toasts"></div>
+
+  <!-- ═══════════ PAGE: HOME ═══════════ -->
+  <div class="page active" id="page-home">
+    <div class="hero">
+      <div class="hero-badge"><span class="hb-dot"></span> Protocol v1.0 — Testnet</div>
+      <h1>Privacy-Preserving Real Estate Verification</h1>
+      <p class="sub">Prove property ownership, tenant eligibility, and transaction conditions using zero-knowledge proofs over TLSNotary-authenticated government records — without exposing personal data.</p>
+      <div class="hero-ctas">
+        <button class="btn btn-landlord" onclick="switchRole('landlord');navigate('dashboard')">I'm a Landlord / Seller</button>
+        <button class="btn btn-primary" onclick="switchRole('tenant');navigate('listings')">I'm a Tenant / Buyer</button>
+      </div>
+    </div>
+    <div class="container">
+      <div style="text-align:center;margin-bottom:48px">
+        <div class="section-title">How It Works</div>
+        <div class="section-heading">Three Pillars of Trust</div>
+      </div>
+      <div class="how-grid">
+        <div class="how-card">
+          <div class="hc-icon">&#x1f512;</div>
+          <h3>TLSNotary</h3>
+          <p>Fetch authoritative records from government portals (e-Devlet) and produce a cryptographic proof of data authenticity — no server changes needed.</p>
+        </div>
+        <div class="how-card">
+          <div class="hc-icon">&#x1f6e1;</div>
+          <h3>Zero-Knowledge Proofs</h3>
+          <p>Evaluate predicates like "I own this property" or "income &ge; 3&times; rent" revealing only true/false — all PII stays private.</p>
+        </div>
+        <div class="how-card">
+          <div class="hc-icon">&#x26d3;</div>
+          <h3>Smart Contracts</h3>
+          <p>On-chain settlement with escrow, slashing, and state machines. Ad_Hash binding prevents bait-and-switch. Nonces prevent replay.</p>
+        </div>
+      </div>
+      <div style="text-align:center;margin-bottom:48px">
+        <div class="section-title">Use Cases</div>
+        <div class="section-heading">Renting & Selling</div>
+      </div>
+      <div class="usecase-grid">
+        <div class="usecase-card rent">
+          <h3><span style="font-size:1.3rem">&#127968;</span> Renting</h3>
+          <ul class="usecase-list">
+            <li>Ownership proof via &Pi;<sub>own</sub> — prove you can lease</li>
+            <li>Income eligibility via &Pi;<sub>elig</sub> — prove income &ge; 3&times; rent</li>
+            <li>Deposit escrowed on-chain with timeout protection</li>
+            <li>Key handover verified via &Pi;<sub>trans</sub></li>
+            <li>Subletting fraud prevented by fresh ownership checks</li>
+          </ul>
+        </div>
+        <div class="usecase-card sale">
+          <h3><span style="font-size:1.3rem">&#127970;</span> Selling</h3>
+          <ul class="usecase-list">
+            <li>Title + encumbrance verification — no active liens</li>
+            <li>Valuation predicate — appraised value &ge; V<sub>min</sub></li>
+            <li>Purchase funds escrowed with extended &tau;<sub>lock</sub></li>
+            <li>Deed transfer proven via registry update proof</li>
+            <li>Cross-listing fraud blocked by LOCKED state</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ PAGE: LISTINGS ═══════════ -->
+  <div class="page" id="page-listings">
+    <div class="container">
+      <div class="dash-header">
+        <h2>Browse Listings</h2>
+      </div>
+      <div class="filter-bar">
+        <select id="filter-type" onchange="renderListings()">
+          <option value="all">All Types</option>
+          <option value="rent">Rent</option>
+          <option value="sale">Sale</option>
+        </select>
+        <select id="filter-status" onchange="renderListings()">
+          <option value="all">All Status</option>
+          <option value="ACTIVE">Active</option>
+          <option value="LOCKED">Locked</option>
+          <option value="SETTLED">Settled</option>
+        </select>
+        <input type="text" id="filter-search" placeholder="Search by address or Ad_Hash..." oninput="renderListings()">
+      </div>
+      <div class="listings-grid" id="listings-grid"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════ PAGE: DASHBOARD ═══════════ -->
+  <div class="page" id="page-dashboard">
+    <div class="container">
+      <!-- LANDLORD DASHBOARD -->
+      <div id="dash-landlord">
+        <div class="dash-header">
+          <h2>Landlord / Seller Dashboard</h2>
+        </div>
+        <div class="dash-stats">
+          <div class="stat-card"><div class="stat-label">Active Listings</div><div class="stat-value" id="stat-active">0</div></div>
+          <div class="stat-card"><div class="stat-label">Pending Apps</div><div class="stat-value" id="stat-apps">0</div></div>
+          <div class="stat-card"><div class="stat-label">Total Locked</div><div class="stat-value" id="stat-locked">0 ETH</div></div>
+          <div class="stat-card"><div class="stat-label">Settled</div><div class="stat-value" id="stat-settled">0</div></div>
+        </div>
+        <div class="tabs">
+          <button class="tab active" onclick="switchTab(this,'ltab','ltab-create')">Create Listing</button>
+          <button class="tab" onclick="switchTab(this,'ltab','ltab-listings')">My Listings</button>
+          <button class="tab" onclick="switchTab(this,'ltab','ltab-apps')">Applications</button>
+          <button class="tab" onclick="switchTab(this,'ltab','ltab-settle')">Settlements</button>
+        </div>
+        <!-- Create Listing -->
+        <div class="ltab" id="ltab-create">
+          <div class="stepper-header" id="create-stepper">
+            <div class="step-indicator active" data-step="1"><div class="step-num">1</div><div class="step-label">Metadata</div></div>
+            <div class="step-indicator" data-step="2"><div class="step-num">2</div><div class="step-label">Prove Ownership</div></div>
+            <div class="step-indicator" data-step="3"><div class="step-num">3</div><div class="step-label">ZK Proof</div></div>
+            <div class="step-indicator" data-step="4"><div class="step-num">4</div><div class="step-label">Submit</div></div>
+          </div>
+          <!-- Step 1: Metadata -->
+          <div class="step-content" id="create-step-1">
+            <div class="form-grid">
+              <div class="form-group full">
+                <label>Listing Type</label>
+                <div class="radio-row">
+                  <label><input type="radio" name="list-type" value="rent" checked> Rent</label>
+                  <label><input type="radio" name="list-type" value="sale"> Sale</label>
+                </div>
+              </div>
+              <div class="form-group"><label>Property Address</label><input type="text" id="inp-address" placeholder="e.g. Kadikoy, Istanbul"></div>
+              <div class="form-group"><label>Price (ETH)</label><input type="number" id="inp-price" placeholder="0.5" step="0.01"></div>
+              <div class="form-group full"><label>Description</label><textarea id="inp-desc" placeholder="Describe the property..."></textarea></div>
+              <div class="form-group full">
+                <label>Required Proofs (Policy)</label>
+                <div class="checkbox-row">
+                  <label><input type="checkbox" id="chk-own" checked disabled> Ownership (&Pi;<sub>own</sub>)</label>
+                  <label><input type="checkbox" id="chk-income"> Income &ge; N&times; price</label>
+                  <label><input type="checkbox" id="chk-lien"> Title lien-free</label>
+                  <label><input type="checkbox" id="chk-val"> Valuation &ge; V<sub>min</sub></label>
+                </div>
+              </div>
+              <div class="form-group"><label>Bond Amount (ETH)</label><input type="number" id="inp-bond" placeholder="0.5" step="0.01"></div>
+              <div class="form-group"><label>Escrow Timeout (days)</label><input type="number" id="inp-timeout" placeholder="30"></div>
+            </div>
+            <div class="step-footer">
+              <button class="btn btn-primary" onclick="createStep(2)">Next &rarr;</button>
+            </div>
+          </div>
+          <!-- Step 2: Prove Ownership -->
+          <div class="step-content hidden" id="create-step-2">
+            <h3 style="font-family:var(--font-display);font-weight:700;margin-bottom:8px">TLSNotary Ownership Attestation</h3>
+            <p style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:24px">Fetching ownership record from e-Devlet via MPC-TLS session...</p>
+            <div class="sim-terminal" id="sim-own">
+              <div class="sim-line" data-delay="400"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">Connecting to e-Devlet (HTTPS)...</span></div>
+              <div class="sim-line" data-delay="1200"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">Fetching ownership record...</span></div>
+              <div class="sim-line" data-delay="2000"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">MPC-TLS session with Notary Network...</span></div>
+              <div class="sim-line" data-delay="3000"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">Generating transcript commitment C<sub>T</sub>...</span></div>
+              <div class="sim-line" data-delay="3800"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">Threshold signature &sigma; from Notary (3-of-5)...</span></div>
+              <div class="sim-meta hidden" id="sim-own-meta">
+                <div class="sim-meta-item"><span class="label">Nonce</span><span class="value" id="own-nonce"></span></div>
+                <div class="sim-meta-item"><span class="label">Timestamp</span><span class="value" id="own-ts"></span></div>
+                <div class="sim-meta-item"><span class="label">C_T</span><span class="value" id="own-ct"></span></div>
+                <div class="sim-meta-item"><span class="label">Source</span><span class="value">e-devlet.gov.tr</span></div>
+              </div>
+            </div>
+            <div class="step-footer">
+              <button class="btn btn-outline" onclick="createStep(1)">&larr; Back</button>
+              <button class="btn btn-primary hidden" id="own-next" onclick="createStep(3)">Next &rarr;</button>
+            </div>
+          </div>
+          <!-- Step 3: ZK Proof -->
+          <div class="step-content hidden" id="create-step-3">
+            <h3 style="font-family:var(--font-display);font-weight:700;margin-bottom:8px">Zero-Knowledge Proof Generation</h3>
+            <p style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:24px">Generating &pi;<sub>own</sub> — proving ownership predicate without revealing PII...</p>
+            <div class="sim-terminal">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <span style="font-size:0.78rem;color:var(--text-tertiary)">Generating &pi;<sub>own</sub>...</span>
+                <span style="font-size:0.78rem;color:var(--tenant)" id="zk-pct-own">0%</span>
+              </div>
+              <div class="proof-progress"><div class="proof-progress-fill" id="zk-bar-own"></div></div>
+              <div style="margin-top:20px">
+                <div style="font-size:0.72rem;color:var(--text-tertiary);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px">Public Inputs (w)</div>
+                <div class="data-row"><span class="data-label">C_T</span><span class="data-value public" id="zk-ct-own"></span></div>
+                <div class="data-row"><span class="data-label">Ad_Hash</span><span class="data-value public" id="zk-adhash-own"></span></div>
+                <div class="data-row"><span class="data-label">PolicyID</span><span class="data-value public" id="zk-policy-own"></span></div>
+                <div class="data-row"><span class="data-label">Nonce</span><span class="data-value public" id="zk-nonce-own"></span></div>
+              </div>
+              <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim)">
+                <div style="font-size:0.72rem;color:var(--text-tertiary);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px">Private (Hidden)</div>
+                <div class="data-row"><span class="data-label">Registry</span><span class="data-value private">&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;</span></div>
+                <div class="data-row"><span class="data-label">PII</span><span class="data-value private">&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;</span></div>
+              </div>
+              <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim)">
+                <div class="data-row"><span class="data-label">Predicate</span><span class="data-value" id="zk-result-own" style="color:var(--text-tertiary)">pending...</span></div>
+              </div>
+            </div>
+            <div class="step-footer">
+              <button class="btn btn-outline" onclick="createStep(2)">&larr; Back</button>
+              <button class="btn btn-primary hidden" id="zk-next-own" onclick="createStep(4)">Next &rarr;</button>
+            </div>
+          </div>
+          <!-- Step 4: Submit -->
+          <div class="step-content hidden" id="create-step-4">
+            <h3 style="font-family:var(--font-display);font-weight:700;margin-bottom:8px">On-Chain Submission</h3>
+            <p style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:24px">SC<sub>PPREV</sub> verifying proof, signature, freshness, and bond...</p>
+            <div class="verify-list" id="verify-own">
+              <div class="verify-item" data-delay="300"><div class="v-icon pass">&#x2713;</div><span class="v-text">Threshold signature &sigma; valid (VerifySig)</span></div>
+              <div class="verify-item" data-delay="800"><div class="v-icon pass">&#x2713;</div><span class="v-text">ZK proof &pi;<sub>own</sub> valid (ZKP.Verify)</span></div>
+              <div class="verify-item" data-delay="1300"><div class="v-icon pass">&#x2713;</div><span class="v-text">Freshness check passed (now - t<sub>auth</sub> &le; &Delta;)</span></div>
+              <div class="verify-item" data-delay="1800"><div class="v-icon pass">&#x2713;</div><span class="v-text">Nonce unused — replay protection confirmed</span></div>
+              <div class="verify-item" data-delay="2300"><div class="v-icon pass">&#x2713;</div><span class="v-text">Bond deposited (dep &ge; B<sub>req</sub>)</span></div>
+            </div>
+            <div id="submit-result" class="hidden" style="margin-top:24px;padding:20px;border-radius:var(--radius-md);background:var(--success-dim);border:1px solid rgba(0,230,118,0.2)">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                <span style="font-size:1.2rem">&#x2713;</span>
+                <span style="font-weight:700;font-size:1rem">Listing Registered Successfully</span>
+              </div>
+              <div class="data-row"><span class="data-label">Status</span><span class="badge badge-active">ACTIVE</span></div>
+              <div class="data-row"><span class="data-label">Ad_Hash</span><span class="data-value mono" id="result-adhash"></span></div>
+            </div>
+            <div class="step-footer">
+              <button class="btn btn-outline" onclick="createStep(3)">&larr; Back</button>
+              <button class="btn btn-primary hidden" id="submit-done-btn" onclick="finishCreate()">View My Listings &rarr;</button>
+            </div>
+          </div>
+        </div>
+        <!-- My Listings -->
+        <div class="ltab hidden" id="ltab-listings">
+          <div class="table-wrap"><table>
+            <thead><tr><th>Ad_Hash</th><th>Type</th><th>Price</th><th>Status</th><th>Applications</th><th>Actions</th></tr></thead>
+            <tbody id="my-listings-body"></tbody>
+          </table></div>
+        </div>
+        <!-- Applications -->
+        <div class="ltab hidden" id="ltab-apps">
+          <div class="table-wrap"><table>
+            <thead><tr><th>appId</th><th>Listing</th><th>Tenant</th><th>Proof</th><th>Escrow</th><th>Actions</th></tr></thead>
+            <tbody id="apps-body"></tbody>
+          </table></div>
+        </div>
+        <!-- Settlements -->
+        <div class="ltab hidden" id="ltab-settle">
+          <div id="landlord-settle-content"></div>
+        </div>
+      </div>
+      <!-- TENANT DASHBOARD -->
+      <div id="dash-tenant" class="hidden">
+        <div class="dash-header">
+          <h2>Tenant / Buyer Dashboard</h2>
+        </div>
+        <div class="dash-stats">
+          <div class="stat-card"><div class="stat-label">My Applications</div><div class="stat-value" id="tstat-apps">0</div></div>
+          <div class="stat-card"><div class="stat-label">Pending</div><div class="stat-value" id="tstat-pending">0</div></div>
+          <div class="stat-card"><div class="stat-label">Escrowed</div><div class="stat-value" id="tstat-escrowed">0 ETH</div></div>
+          <div class="stat-card"><div class="stat-label">Settled</div><div class="stat-value" id="tstat-settled">0</div></div>
+        </div>
+        <div class="tabs">
+          <button class="tab active" onclick="switchTab(this,'ttab','ttab-apply')">Browse & Apply</button>
+          <button class="tab" onclick="switchTab(this,'ttab','ttab-myapps')">My Applications</button>
+          <button class="tab" onclick="switchTab(this,'ttab','ttab-settle')">Settlements</button>
+        </div>
+        <!-- Browse & Apply -->
+        <div class="ttab" id="ttab-apply">
+          <div id="tenant-apply-browse">
+            <div class="listings-grid" id="tenant-listings-grid"></div>
+          </div>
+          <div id="tenant-apply-flow" class="hidden">
+            <div class="stepper-header" id="apply-stepper">
+              <div class="step-indicator active" data-step="1"><div class="step-num">1</div><div class="step-label">Review</div></div>
+              <div class="step-indicator" data-step="2"><div class="step-num">2</div><div class="step-label">Prove Eligibility</div></div>
+              <div class="step-indicator" data-step="3"><div class="step-num">3</div><div class="step-label">ZK Proof</div></div>
+              <div class="step-indicator" data-step="4"><div class="step-num">4</div><div class="step-label">Submit + Escrow</div></div>
+            </div>
+            <!-- Apply Step 1 -->
+            <div class="step-content" id="apply-step-1">
+              <h3 style="font-family:var(--font-display);font-weight:700;margin-bottom:16px">Listing Requirements</h3>
+              <div id="apply-review-content"></div>
+              <div class="step-footer">
+                <button class="btn btn-outline" onclick="cancelApply()">&larr; Cancel</button>
+                <button class="btn btn-primary" onclick="applyStep(2)">Prove Eligibility &rarr;</button>
+              </div>
+            </div>
+            <!-- Apply Step 2 -->
+            <div class="step-content hidden" id="apply-step-2">
+              <h3 style="font-family:var(--font-display);font-weight:700;margin-bottom:8px">TLSNotary Eligibility Attestation</h3>
+              <p style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:24px">Fetching eligibility records via MPC-TLS session...</p>
+              <div class="sim-terminal" id="sim-elig">
+                <div class="sim-line" data-delay="400"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">Connecting to data source (HTTPS)...</span></div>
+                <div class="sim-line" data-delay="1100"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">Fetching income / employment record...</span></div>
+                <div class="sim-line" data-delay="1900"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">MPC-TLS session with Notary Network...</span></div>
+                <div class="sim-line" data-delay="2700"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">Generating transcript commitment C<sub>T_elig</sub>...</span></div>
+                <div class="sim-line" data-delay="3500"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">Threshold signature &sigma;<sub>T</sub> from Notary (3-of-5)...</span></div>
+                <div class="sim-meta hidden" id="sim-elig-meta">
+                  <div class="sim-meta-item"><span class="label">Nonce</span><span class="value" id="elig-nonce"></span></div>
+                  <div class="sim-meta-item"><span class="label">Timestamp</span><span class="value" id="elig-ts"></span></div>
+                </div>
+              </div>
+              <div class="step-footer">
+                <button class="btn btn-outline" onclick="applyStep(1)">&larr; Back</button>
+                <button class="btn btn-primary hidden" id="elig-next" onclick="applyStep(3)">Next &rarr;</button>
+              </div>
+            </div>
+            <!-- Apply Step 3 -->
+            <div class="step-content hidden" id="apply-step-3">
+              <h3 style="font-family:var(--font-display);font-weight:700;margin-bottom:8px">Zero-Knowledge Proof Generation</h3>
+              <p style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:24px">Generating &pi;<sub>elig</sub> — proving eligibility predicate...</p>
+              <div class="sim-terminal">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                  <span style="font-size:0.78rem;color:var(--text-tertiary)">Generating &pi;<sub>elig</sub>...</span>
+                  <span style="font-size:0.78rem;color:var(--tenant)" id="zk-pct-elig">0%</span>
+                </div>
+                <div class="proof-progress"><div class="proof-progress-fill" id="zk-bar-elig"></div></div>
+                <div style="margin-top:20px">
+                  <div style="font-size:0.72rem;color:var(--text-tertiary);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px">Public Inputs (w<sub>T</sub>)</div>
+                  <div class="data-row"><span class="data-label">C_T_elig</span><span class="data-value public" id="zk-ct-elig"></span></div>
+                  <div class="data-row"><span class="data-label">Ad_Hash</span><span class="data-value public" id="zk-adhash-elig"></span></div>
+                  <div class="data-row"><span class="data-label">PolicyID</span><span class="data-value public" id="zk-policy-elig"></span></div>
+                  <div class="data-row"><span class="data-label">T_addr</span><span class="data-value public">0x9c2f...3a7B</span></div>
+                </div>
+                <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim)">
+                  <div style="font-size:0.72rem;color:var(--text-tertiary);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px">Private (Hidden)</div>
+                  <div class="data-row"><span class="data-label">Income</span><span class="data-value private">&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;</span></div>
+                  <div class="data-row"><span class="data-label">Employer</span><span class="data-value private">&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;</span></div>
+                </div>
+                <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim)">
+                  <div class="data-row"><span class="data-label">Predicate</span><span class="data-value" id="zk-result-elig" style="color:var(--text-tertiary)">pending...</span></div>
+                </div>
+              </div>
+              <div class="step-footer">
+                <button class="btn btn-outline" onclick="applyStep(2)">&larr; Back</button>
+                <button class="btn btn-primary hidden" id="zk-next-elig" onclick="applyStep(4)">Next &rarr;</button>
+              </div>
+            </div>
+            <!-- Apply Step 4 -->
+            <div class="step-content hidden" id="apply-step-4">
+              <h3 style="font-family:var(--font-display);font-weight:700;margin-bottom:8px">Submit Application + Escrow Deposit</h3>
+              <p style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:24px">SC<sub>PPREV</sub> verifying eligibility proof and locking escrow...</p>
+              <div class="verify-list" id="verify-elig">
+                <div class="verify-item" data-delay="300"><div class="v-icon pass">&#x2713;</div><span class="v-text">Threshold signature &sigma;<sub>T</sub> valid</span></div>
+                <div class="verify-item" data-delay="800"><div class="v-icon pass">&#x2713;</div><span class="v-text">ZK proof &pi;<sub>elig</sub> valid</span></div>
+                <div class="verify-item" data-delay="1300"><div class="v-icon pass">&#x2713;</div><span class="v-text">Freshness check passed (&le; &Delta;<sub>elig</sub>)</span></div>
+                <div class="verify-item" data-delay="1800"><div class="v-icon pass">&#x2713;</div><span class="v-text">Nonce<sub>T</sub> unused</span></div>
+                <div class="verify-item" data-delay="2200"><div class="v-icon pass">&#x2713;</div><span class="v-text">Listing status = ACTIVE &#x2713;</span></div>
+                <div class="verify-item" data-delay="2600"><div class="v-icon pass">&#x2713;</div><span class="v-text">No duplicate application</span></div>
+                <div class="verify-item" data-delay="3000"><div class="v-icon pass">&#x2713;</div><span class="v-text">Escrow deposited (dep<sub>escrow</sub> &ge; ReqEscrow)</span></div>
+              </div>
+              <div id="apply-result" class="hidden" style="margin-top:24px;padding:20px;border-radius:var(--radius-md);background:var(--success-dim);border:1px solid rgba(0,230,118,0.2)">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                  <span style="font-size:1.2rem">&#x2713;</span>
+                  <span style="font-weight:700;font-size:1rem">Application Submitted</span>
+                </div>
+                <div class="data-row"><span class="data-label">App Status</span><span class="badge badge-pending">PENDING_TRANSFER</span></div>
+                <div class="data-row"><span class="data-label">Listing</span><span class="badge badge-locked">LOCKED</span></div>
+                <div class="data-row"><span class="data-label">appId</span><span class="data-value mono" id="apply-appid"></span></div>
+              </div>
+              <div class="step-footer">
+                <button class="btn btn-outline" onclick="applyStep(3)">&larr; Back</button>
+                <button class="btn btn-primary hidden" id="apply-done-btn" onclick="finishApply()">View My Applications &rarr;</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- My Applications -->
+        <div class="ttab hidden" id="ttab-myapps">
+          <div class="table-wrap"><table>
+            <thead><tr><th>appId</th><th>Listing</th><th>Type</th><th>Escrow</th><th>Status</th><th>Expires</th><th>Action</th></tr></thead>
+            <tbody id="my-apps-body"></tbody>
+          </table></div>
+        </div>
+        <!-- Settlements -->
+        <div class="ttab hidden" id="ttab-settle">
+          <div id="tenant-settle-content"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ PAGE: SETTLEMENT ═══════════ -->
+  <div class="page" id="page-settlement">
+    <div class="container">
+      <div class="dash-header"><h2>Settlement — &Pi;<sub>trans</sub></h2></div>
+      <div class="timeline" id="settle-timeline"></div>
+      <div class="settle-grid">
+        <div class="settle-card">
+          <h4>Escrow Status</h4>
+          <div class="big-num" id="settle-total">2.0 ETH</div>
+          <div class="settle-detail"><span>Locked deposit</span><span id="settle-dep">1.5 ETH</span></div>
+          <div class="settle-detail"><span>Bond (B<sub>req</sub>)</span><span id="settle-bond">0.5 ETH</span></div>
+        </div>
+        <div class="settle-card">
+          <h4>Countdown (&tau;<sub>lock</sub>)</h4>
+          <div class="countdown" id="settle-countdown">24d 13h 42m</div>
+          <div class="settle-detail"><span>Expires</span><span id="settle-expires">2026-04-18</span></div>
+        </div>
+      </div>
+      <div class="settle-actions">
+        <div class="settle-action-card">
+          <h4>Landlord / Seller</h4>
+          <div class="btn-row">
+            <button class="btn btn-landlord btn-sm" onclick="confirmSettlement('landlord')">Confirm Transfer &#x2713;</button>
+            <button class="btn btn-danger btn-sm" onclick="raiseDispute('landlord')">Raise Dispute &#x26A0;</button>
+          </div>
+        </div>
+        <div class="settle-action-card">
+          <h4>Tenant / Buyer</h4>
+          <div class="btn-row">
+            <button class="btn btn-primary btn-sm" onclick="confirmSettlement('tenant')">Confirm Receipt &#x2713;</button>
+            <button class="btn btn-danger btn-sm" onclick="raiseDispute('tenant')">Raise Dispute &#x26A0;</button>
+          </div>
+        </div>
+      </div>
+      <div id="settle-proof-section" class="hidden">
+        <h3 style="font-family:var(--font-display);font-weight:700;margin-bottom:16px">&Pi;<sub>trans</sub> — Transfer Verification Proof</h3>
+        <div class="sim-terminal" id="sim-trans">
+          <div class="sim-line" data-delay="300"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">Querying registry for updated ownership...</span></div>
+          <div class="sim-line" data-delay="1000"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">TLSNotary attestation of transfer...</span></div>
+          <div class="sim-line" data-delay="1800"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">ZK proof: H(registry_tenant) == H(T_addr)...</span></div>
+          <div class="sim-line" data-delay="2500"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">Cross-chain replay check (SC_addr + chain_id)...</span></div>
+          <div class="sim-line" data-delay="3200"><div class="sim-icon pending">&#x25CB;</div><span class="sim-text">Settlement: SETTLED &#x2713;</span></div>
+        </div>
+        <div id="settle-final" class="hidden" style="margin-top:24px;padding:20px;border-radius:var(--radius-md);background:var(--success-dim);border:1px solid rgba(0,230,118,0.2);text-align:center">
+          <div style="font-size:1.5rem;margin-bottom:8px">&#x2713;</div>
+          <div style="font-weight:700;font-size:1.1rem">Transaction Settled Successfully</div>
+          <div style="color:var(--text-secondary);font-size:0.88rem;margin-top:4px">Escrow + bond released to landlord/seller</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ PAGE: VISUALIZER ═══════════ -->
+  <div class="page" id="page-visualizer">
+    <div class="container">
+      <div class="dash-header"><h2>Protocol Visualizer</h2></div>
+      <div class="viz-container">
+        <div class="viz-actors" id="viz-actors">
+          <div class="viz-actor a-tenant">Tenant</div>
+          <div class="viz-actor a-landlord">Landlord</div>
+          <div class="viz-actor a-edevlet">e-Devlet</div>
+          <div class="viz-actor a-notary">Notary Network</div>
+          <div class="viz-actor a-adcontract">Ad Contract</div>
+          <div class="viz-actor a-escrow">Escrow</div>
+          <svg class="viz-svg" id="viz-svg"></svg>
+        </div>
+      </div>
+      <div class="viz-controls">
+        <div class="step-nav">
+          <button class="btn btn-outline btn-sm" onclick="vizPrev()">&#x25C0; Prev</button>
+          <span class="step-label-txt" id="viz-step-label">Step 1 / 17</span>
+          <button class="btn btn-outline btn-sm" onclick="vizNext()">Next &#x25B6;</button>
+        </div>
+        <div class="step-progress"><div class="step-progress-fill" id="viz-progress"></div></div>
+        <button class="btn btn-primary btn-sm" id="viz-autoplay" onclick="vizAutoPlay()">&#x25B6; Auto-Play</button>
+      </div>
+      <div class="viz-detail" id="viz-detail">
+        <h4 id="viz-detail-title">Step 1: Ownership Data Request</h4>
+        <div class="viz-desc" id="viz-detail-desc"></div>
+        <div class="viz-formula" id="viz-detail-formula"></div>
+        <div class="viz-privacy">
+          <div class="viz-priv-col priv"><h5>&#x1F512; Private</h5><ul id="viz-private"></ul></div>
+          <div class="viz-priv-col pub"><h5>&#x1F513; Public</h5><ul id="viz-public"></ul></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+/* ═══════════════════════ STATE ═══════════════════════ */
+const STATE = {
+  role: 'landlord',
+  wallet: { address: '0x9c2f8E4a...3a7B', balance: 10, connected: true },
+  listings: [],
+  applications: [],
+  currentPage: 'home',
+  createStep: 1,
+  applyStep: 1,
+  applyTarget: null,
+  vizStep: 1,
+  vizPlaying: false,
+};
+
+/* ═══════════════════════ SEED DATA ═══════════════════════ */
+function seedData() {
+  STATE.listings = [
+    { adHash:'0xb4a7f2e1...9c3d', type:'rent', address:'Kadikoy, Istanbul', price:0.5, desc:'2BR apartment near ferry terminal', status:'ACTIVE', owner:'0x9c2f...3a7B', bond:0.5, timeout:30, policy:['ownership','income'], apps:2, policyId:'OWN_RENT_V1' },
+    { adHash:'0xc2f8d3b4...7e1a', type:'sale', address:'Besiktas, Istanbul', price:50, desc:'3BR penthouse with Bosphorus view', status:'LOCKED', owner:'0x9c2f...3a7B', bond:5, timeout:60, policy:['ownership','lien','valuation'], apps:1, policyId:'OWN_SALE_V1' },
+    { adHash:'0xd1e5a6c9...2b8f', type:'rent', address:'Cihangir, Istanbul', price:0.3, desc:'Studio apartment, renovated', status:'SETTLED', owner:'0x7b3e...1d4F', bond:0.3, timeout:30, policy:['ownership','income'], apps:1, policyId:'OWN_RENT_V1' },
+    { adHash:'0xe3f9b1d2...4a5c', type:'sale', address:'Uskudar, Istanbul', price:35, desc:'Historic waterfront villa', status:'ACTIVE', owner:'0x7b3e...1d4F', bond:3.5, timeout:90, policy:['ownership','lien'], apps:0, policyId:'OWN_SALE_V2' },
+  ];
+  STATE.applications = [
+    { appId:'0xf1a2b3c4...d5e6', adHash:'0xb4a7f2e1...9c3d', tenant:'0x8d3a...5c2E', type:'rent', escrow:1.5, status:'PENDING_TRANSFER', expiresAt: Date.now()+24*24*3600000, proof:true },
+    { appId:'0xf2b4c6d8...e1a3', adHash:'0xb4a7f2e1...9c3d', tenant:'0x4e7f...9b1C', type:'rent', escrow:1.5, status:'PENDING_TRANSFER', expiresAt: Date.now()+20*24*3600000, proof:true },
+    { appId:'0xf3c5d7e9...a2b4', adHash:'0xc2f8d3b4...7e1a', tenant:'0x9c2f...3a7B', type:'sale', escrow:10, status:'PENDING_TRANSFER', expiresAt: Date.now()+45*24*3600000, proof:true },
+    { appId:'0xf4d6e8a1...b3c5', adHash:'0xd1e5a6c9...2b8f', tenant:'0x9c2f...3a7B', type:'rent', escrow:0.9, status:'SETTLED', expiresAt: 0, proof:true },
+  ];
+}
+
+/* ═══════════════════════ UTILS ═══════════════════════ */
+function rHex(n=8){return '0x'+[...Array(n)].map(()=>Math.floor(Math.random()*16).toString(16)).join('')}
+function rHash(){return rHex(8)+'...'+rHex(4)}
+function statusBadge(s){
+  const m={ACTIVE:'active',LOCKED:'locked',SETTLED:'settled',EXPIRED:'expired',PENDING_TRANSFER:'pending',DISPUTE:'dispute'};
+  return `<span class="badge badge-${m[s]||'active'}">${s.replace('_',' ')}</span>`;
+}
+function typeBadge(t){return `<span class="badge badge-${t}">${t.toUpperCase()}</span>`}
+function toast(msg,type='success'){
+  const el=document.createElement('div');el.className=`toast ${type}`;el.textContent=msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(()=>el.remove(),4000);
+}
+function daysLeft(ts){
+  if(!ts)return '—';
+  const d=Math.max(0,Math.floor((ts-Date.now())/(86400000)));
+  const h=Math.max(0,Math.floor(((ts-Date.now())%(86400000))/3600000));
+  return d>0?`${d}d ${h}h`:'Expired';
+}
+
+/* ═══════════════════════ NAVIGATION ═══════════════════════ */
+function navigate(page){
+  STATE.currentPage=page;
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  const el=document.getElementById('page-'+page);
+  if(el)el.classList.add('active');
+  document.querySelectorAll('.nav-links a').forEach(a=>{
+    a.classList.toggle('active',a.dataset.nav===page);
+  });
+  window.location.hash=page;
+  if(page==='listings')renderListings();
+  if(page==='dashboard')renderDashboard();
+}
+function switchRole(role){
+  STATE.role=role;
+  document.querySelectorAll('.role-switch button').forEach(b=>{
+    b.className=b.textContent.trim().toLowerCase().includes(role)?`active-role-${role}`:'';
+  });
+  if(STATE.currentPage==='dashboard')renderDashboard();
+}
+function switchTab(btn,cls,id){
+  btn.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.'+cls).forEach(t=>t.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+  if(id==='ltab-listings')renderMyListings();
+  if(id==='ltab-apps')renderApps();
+  if(id==='ttab-myapps')renderMyApps();
+  if(id==='ttab-apply')renderTenantListings();
+}
+function toggleWallet(){toast(STATE.wallet.connected?'Wallet: '+STATE.wallet.address:'Connect wallet first','success')}
+
+/* ═══════════════════════ RENDER: LISTINGS ═══════════════════════ */
+function renderListings(){
+  const typeF=document.getElementById('filter-type').value;
+  const statusF=document.getElementById('filter-status').value;
+  const search=document.getElementById('filter-search').value.toLowerCase();
+  let list=STATE.listings.filter(l=>{
+    if(typeF!=='all'&&l.type!==typeF)return false;
+    if(statusF!=='all'&&l.status!==statusF)return false;
+    if(search&&!l.address.toLowerCase().includes(search)&&!l.adHash.toLowerCase().includes(search))return false;
+    return true;
+  });
+  const grid=document.getElementById('listings-grid');
+  grid.innerHTML=list.map(l=>`
+    <div class="listing-card" onclick="${STATE.role==='tenant'?`startApply('${l.adHash}')`:''}">
+      <div class="listing-img">
+        <span class="type-badge">${typeBadge(l.type)}</span>
+        <span class="status-badge">${statusBadge(l.status)}</span>
+        &#127968;
+      </div>
+      <div class="listing-body">
+        <h3>${l.address}</h3>
+        <div class="listing-price">${l.price} ETH${l.type==='rent'?'/mo':''}</div>
+        <div class="listing-meta">
+          ${l.policy.map(p=>`<span class="meta-tag">${p}</span>`).join('')}
+        </div>
+        <button class="btn btn-outline btn-sm" style="width:100%;justify-content:center">${STATE.role==='tenant'&&l.status==='ACTIVE'?'Apply Now':'View Details'}</button>
+      </div>
+    </div>`).join('');
+}
+
+/* ═══════════════════════ RENDER: DASHBOARDS ═══════════════════════ */
+function renderDashboard(){
+  if(STATE.role==='landlord'){
+    document.getElementById('dash-landlord').classList.remove('hidden');
+    document.getElementById('dash-tenant').classList.add('hidden');
+    const myL=STATE.listings.filter(l=>l.owner==='0x9c2f...3a7B');
+    document.getElementById('stat-active').textContent=myL.filter(l=>l.status==='ACTIVE').length;
+    document.getElementById('stat-apps').textContent=STATE.applications.filter(a=>myL.some(l=>l.adHash===a.adHash)&&a.status==='PENDING_TRANSFER').length;
+    document.getElementById('stat-locked').textContent=STATE.applications.filter(a=>myL.some(l=>l.adHash===a.adHash)&&a.status==='PENDING_TRANSFER').reduce((s,a)=>s+a.escrow,0).toFixed(1)+' ETH';
+    document.getElementById('stat-settled').textContent=myL.filter(l=>l.status==='SETTLED').length;
+    renderMyListings();
+  } else {
+    document.getElementById('dash-landlord').classList.add('hidden');
+    document.getElementById('dash-tenant').classList.remove('hidden');
+    const myA=STATE.applications.filter(a=>a.tenant==='0x9c2f...3a7B');
+    document.getElementById('tstat-apps').textContent=myA.length;
+    document.getElementById('tstat-pending').textContent=myA.filter(a=>a.status==='PENDING_TRANSFER').length;
+    document.getElementById('tstat-escrowed').textContent=myA.filter(a=>a.status==='PENDING_TRANSFER').reduce((s,a)=>s+a.escrow,0).toFixed(1)+' ETH';
+    document.getElementById('tstat-settled').textContent=myA.filter(a=>a.status==='SETTLED').length;
+    renderTenantListings();
+    renderMyApps();
+  }
+}
+function renderMyListings(){
+  const myL=STATE.listings.filter(l=>l.owner==='0x9c2f...3a7B');
+  document.getElementById('my-listings-body').innerHTML=myL.map(l=>`<tr>
+    <td class="mono">${l.adHash}</td>
+    <td>${typeBadge(l.type)}</td>
+    <td class="mono">${l.price} ETH</td>
+    <td>${statusBadge(l.status)}</td>
+    <td>${l.apps}</td>
+    <td><button class="btn btn-outline btn-sm" onclick="viewListing('${l.adHash}')">View</button>
+    ${l.status==='LOCKED'?`<button class="btn btn-primary btn-sm" onclick="goSettle('${l.adHash}')">Settle</button>`:''}</td>
+  </tr>`).join('');
+}
+function renderApps(){
+  const myL=STATE.listings.filter(l=>l.owner==='0x9c2f...3a7B');
+  const apps=STATE.applications.filter(a=>myL.some(l=>l.adHash===a.adHash));
+  document.getElementById('apps-body').innerHTML=apps.map(a=>`<tr>
+    <td class="mono">${a.appId}</td>
+    <td class="mono">${a.adHash.slice(0,12)}...</td>
+    <td class="mono">${a.tenant}</td>
+    <td>${a.proof?'<span style="color:var(--success)">&#x2713; &pi;<sub>elig</sub></span>':'&#x2717;'}</td>
+    <td class="mono">${a.escrow} ETH</td>
+    <td>${a.status==='PENDING_TRANSFER'?`<button class="btn btn-landlord btn-sm" onclick="approveApp('${a.appId}')">Approve</button>
+    <button class="btn btn-danger btn-sm" onclick="rejectApp('${a.appId}')">Reject</button>`:'—'}</td>
+  </tr>`).join('');
+}
+function renderMyApps(){
+  const myA=STATE.applications.filter(a=>a.tenant==='0x9c2f...3a7B');
+  document.getElementById('my-apps-body').innerHTML=myA.map(a=>`<tr>
+    <td class="mono">${a.appId}</td>
+    <td class="mono">${a.adHash.slice(0,12)}...</td>
+    <td>${typeBadge(a.type)}</td>
+    <td class="mono">${a.escrow} ETH</td>
+    <td>${statusBadge(a.status)}</td>
+    <td>${daysLeft(a.expiresAt)}</td>
+    <td>${a.status==='PENDING_TRANSFER'?`<button class="btn btn-primary btn-sm" onclick="goSettle('${a.adHash}')">Settle</button>`:'—'}</td>
+  </tr>`).join('');
+}
+function renderTenantListings(){
+  const active=STATE.listings.filter(l=>l.status==='ACTIVE');
+  document.getElementById('tenant-listings-grid').innerHTML=active.map(l=>`
+    <div class="listing-card" onclick="startApply('${l.adHash}')">
+      <div class="listing-img">
+        <span class="type-badge">${typeBadge(l.type)}</span>
+        <span class="status-badge">${statusBadge(l.status)}</span>
+        &#127968;
+      </div>
+      <div class="listing-body">
+        <h3>${l.address}</h3>
+        <div class="listing-price">${l.price} ETH${l.type==='rent'?'/mo':''}</div>
+        <div class="listing-meta">${l.policy.map(p=>`<span class="meta-tag">${p}</span>`).join('')}</div>
+        <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center">Apply Now</button>
+      </div>
+    </div>`).join('');
+}
+function approveApp(id){
+  const a=STATE.applications.find(x=>x.appId===id);
+  if(a){toast('Application approved — proceed to settlement');goSettle(a.adHash)}
+}
+function rejectApp(id){toast('Application rejected','warning')}
+function viewListing(h){navigate('listings');toast('Viewing listing '+h.slice(0,10)+'...')}
+
+/* ═══════════════════════ CREATE LISTING STEPPER ═══════════════════════ */
+function createStep(step){
+  STATE.createStep=step;
+  const stepper=document.getElementById('create-stepper');
+  stepper.querySelectorAll('.step-indicator').forEach(si=>{
+    const s=parseInt(si.dataset.step);
+    si.classList.toggle('active',s===step);
+    si.classList.toggle('done',s<step);
+  });
+  for(let i=1;i<=4;i++){
+    document.getElementById('create-step-'+i).classList.toggle('hidden',i!==step);
+  }
+  if(step===2)runSimOwn();
+  if(step===3)runZkOwn();
+  if(step===4)runVerifyOwn();
+}
+function runSimOwn(){
+  const sim=document.getElementById('sim-own');
+  const lines=sim.querySelectorAll('.sim-line');
+  const meta=document.getElementById('sim-own-meta');
+  const nextBtn=document.getElementById('own-next');
+  lines.forEach(l=>{l.classList.remove('visible');l.querySelector('.sim-icon').className='sim-icon pending';l.querySelector('.sim-icon').innerHTML='&#x25CB;'});
+  meta.classList.add('hidden');nextBtn.classList.add('hidden');
+  lines.forEach((line,i)=>{
+    const delay=parseInt(line.dataset.delay);
+    setTimeout(()=>{
+      line.classList.add('visible');
+      setTimeout(()=>{
+        line.querySelector('.sim-icon').className='sim-icon done';
+        line.querySelector('.sim-icon').innerHTML='&#x2713;';
+        if(i===lines.length-1){
+          setTimeout(()=>{
+            meta.classList.remove('hidden');
+            document.getElementById('own-nonce').textContent=rHash();
+            document.getElementById('own-ts').textContent=new Date().toISOString();
+            document.getElementById('own-ct').textContent=rHash();
+            nextBtn.classList.remove('hidden');
+            toast('TLSNotary attestation complete');
+          },400);
+        }
+      },600);
+    },delay);
+  });
+}
+function runZkOwn(){
+  const bar=document.getElementById('zk-bar-own');
+  const pct=document.getElementById('zk-pct-own');
+  const result=document.getElementById('zk-result-own');
+  const nextBtn=document.getElementById('zk-next-own');
+  bar.style.width='0%';pct.textContent='0%';result.style.color='var(--text-tertiary)';result.textContent='pending...';nextBtn.classList.add('hidden');
+  document.getElementById('zk-ct-own').textContent=rHash();
+  document.getElementById('zk-adhash-own').textContent=rHash();
+  document.getElementById('zk-policy-own').textContent='OWN_RENT_V1';
+  document.getElementById('zk-nonce-own').textContent=rHash();
+  let p=0;
+  const iv=setInterval(()=>{
+    p+=Math.random()*8+2;if(p>100)p=100;
+    bar.style.width=p+'%';pct.textContent=Math.floor(p)+'%';
+    if(p>=100){
+      clearInterval(iv);
+      result.textContent='ownership = TRUE';result.style.color='var(--success)';
+      nextBtn.classList.remove('hidden');
+      toast('ZK proof &pi;_own generated');
+    }
+  },200);
+}
+function runVerifyOwn(){
+  const items=document.querySelectorAll('#verify-own .verify-item');
+  const result=document.getElementById('submit-result');
+  const btn=document.getElementById('submit-done-btn');
+  items.forEach(i=>{i.classList.remove('visible')});result.classList.add('hidden');btn.classList.add('hidden');
+  items.forEach(item=>{
+    setTimeout(()=>item.classList.add('visible'),parseInt(item.dataset.delay));
+  });
+  setTimeout(()=>{
+    result.classList.remove('hidden');
+    document.getElementById('result-adhash').textContent=rHash();
+    btn.classList.remove('hidden');
+    toast('Listing registered on-chain!');
+  },3000);
+}
+function finishCreate(){
+  const type=document.querySelector('input[name="list-type"]:checked').value;
+  const addr=document.getElementById('inp-address').value||'Istanbul, Turkey';
+  const price=parseFloat(document.getElementById('inp-price').value)||0.5;
+  const newL={
+    adHash:rHash(),type,address:addr,price,
+    desc:document.getElementById('inp-desc').value||'New listing',
+    status:'ACTIVE',owner:'0x9c2f...3a7B',
+    bond:parseFloat(document.getElementById('inp-bond').value)||0.5,
+    timeout:parseInt(document.getElementById('inp-timeout').value)||30,
+    policy:['ownership',...(document.getElementById('chk-income').checked?['income']:[]),...(document.getElementById('chk-lien').checked?['lien']:[]),...(document.getElementById('chk-val').checked?['valuation']:[])],
+    apps:0,policyId:type==='rent'?'OWN_RENT_V1':'OWN_SALE_V1'
+  };
+  STATE.listings.unshift(newL);
+  switchTab(document.querySelectorAll('#dash-landlord .tab')[1],'ltab','ltab-listings');
+  renderDashboard();
+  toast('Listing is now ACTIVE');
+}
+
+/* ═══════════════════════ APPLY FLOW ═══════════════════════ */
+function startApply(adHash){
+  const l=STATE.listings.find(x=>x.adHash===adHash);
+  if(!l||l.status!=='ACTIVE'){toast('Listing not available','warning');return}
+  STATE.applyTarget=l;
+  if(STATE.role!=='tenant'){switchRole('tenant')}
+  navigate('dashboard');
+  setTimeout(()=>{
+    document.getElementById('tenant-apply-browse').classList.add('hidden');
+    document.getElementById('tenant-apply-flow').classList.remove('hidden');
+    const rc=document.getElementById('apply-review-content');
+    rc.innerHTML=`
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="stat-card"><div class="stat-label">Listing</div><div class="stat-value mono" style="font-size:1rem">${l.adHash}</div></div>
+        <div class="stat-card"><div class="stat-label">Type</div><div class="stat-value">${typeBadge(l.type)}</div></div>
+        <div class="stat-card"><div class="stat-label">Price</div><div class="stat-value">${l.price} ETH${l.type==='rent'?'/mo':''}</div></div>
+        <div class="stat-card"><div class="stat-label">Address</div><div class="stat-value" style="font-size:1rem">${l.address}</div></div>
+      </div>
+      <div style="padding:20px;border-radius:var(--radius-md);background:var(--bg-void);border:1px solid var(--border-dim)">
+        <div style="font-family:var(--font-mono);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-tertiary);margin-bottom:12px">You Must Prove</div>
+        ${l.policy.map(p=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:0.9rem"><span style="color:var(--notary)">&#x25B8;</span> ${p==='ownership'?'Ownership (always required)':p==='income'?'Income &ge; '+l.price*3+' ETH/mo (3&times; rent)':p==='lien'?'Title is lien-free':p==='valuation'?'Appraised value &ge; minimum':p}</div>`).join('')}
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-dim);display:flex;justify-content:space-between;font-size:0.88rem">
+          <span style="color:var(--text-tertiary)">Required Escrow</span><span style="font-weight:700">${(l.price*3).toFixed(1)} ETH</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:0.88rem;padding-top:4px">
+          <span style="color:var(--text-tertiary)">Escrow Timeout</span><span>${l.timeout} days</span>
+        </div>
+      </div>`;
+    applyStep(1);
+  },100);
+}
+function cancelApply(){
+  document.getElementById('tenant-apply-browse').classList.remove('hidden');
+  document.getElementById('tenant-apply-flow').classList.add('hidden');
+  STATE.applyTarget=null;
+}
+function applyStep(step){
+  STATE.applyStep=step;
+  document.getElementById('apply-stepper').querySelectorAll('.step-indicator').forEach(si=>{
+    const s=parseInt(si.dataset.step);
+    si.classList.toggle('active',s===step);
+    si.classList.toggle('done',s<step);
+  });
+  for(let i=1;i<=4;i++){
+    document.getElementById('apply-step-'+i).classList.toggle('hidden',i!==step);
+  }
+  if(step===2)runSimElig();
+  if(step===3)runZkElig();
+  if(step===4)runVerifyElig();
+}
+function runSimElig(){
+  const sim=document.getElementById('sim-elig');
+  const lines=sim.querySelectorAll('.sim-line');
+  const meta=document.getElementById('sim-elig-meta');
+  const nextBtn=document.getElementById('elig-next');
+  lines.forEach(l=>{l.classList.remove('visible');l.querySelector('.sim-icon').className='sim-icon pending';l.querySelector('.sim-icon').innerHTML='&#x25CB;'});
+  meta.classList.add('hidden');nextBtn.classList.add('hidden');
+  lines.forEach((line,i)=>{
+    const delay=parseInt(line.dataset.delay);
+    setTimeout(()=>{
+      line.classList.add('visible');
+      setTimeout(()=>{
+        line.querySelector('.sim-icon').className='sim-icon done';
+        line.querySelector('.sim-icon').innerHTML='&#x2713;';
+        if(i===lines.length-1){
+          setTimeout(()=>{
+            meta.classList.remove('hidden');
+            document.getElementById('elig-nonce').textContent=rHash();
+            document.getElementById('elig-ts').textContent=new Date().toISOString();
+            nextBtn.classList.remove('hidden');
+            toast('TLSNotary eligibility attestation complete');
+          },400);
+        }
+      },600);
+    },delay);
+  });
+}
+function runZkElig(){
+  const bar=document.getElementById('zk-bar-elig');
+  const pct=document.getElementById('zk-pct-elig');
+  const result=document.getElementById('zk-result-elig');
+  const nextBtn=document.getElementById('zk-next-elig');
+  bar.style.width='0%';pct.textContent='0%';result.style.color='var(--text-tertiary)';result.textContent='pending...';nextBtn.classList.add('hidden');
+  document.getElementById('zk-ct-elig').textContent=rHash();
+  document.getElementById('zk-adhash-elig').textContent=STATE.applyTarget?.adHash||rHash();
+  document.getElementById('zk-policy-elig').textContent=STATE.applyTarget?.policyId||'OWN_RENT_V1';
+  let p=0;
+  const iv=setInterval(()=>{
+    p+=Math.random()*7+2;if(p>100)p=100;
+    bar.style.width=p+'%';pct.textContent=Math.floor(p)+'%';
+    if(p>=100){
+      clearInterval(iv);
+      result.textContent='income >= 3x rent = TRUE';result.style.color='var(--success)';
+      nextBtn.classList.remove('hidden');
+      toast('ZK proof &pi;_elig generated');
+    }
+  },200);
+}
+function runVerifyElig(){
+  const items=document.querySelectorAll('#verify-elig .verify-item');
+  const result=document.getElementById('apply-result');
+  const btn=document.getElementById('apply-done-btn');
+  items.forEach(i=>{i.classList.remove('visible')});result.classList.add('hidden');btn.classList.add('hidden');
+  items.forEach(item=>{
+    setTimeout(()=>item.classList.add('visible'),parseInt(item.dataset.delay));
+  });
+  setTimeout(()=>{
+    result.classList.remove('hidden');
+    document.getElementById('apply-appid').textContent=rHash();
+    btn.classList.remove('hidden');
+    toast('Application submitted! Listing LOCKED');
+  },3600);
+}
+function finishApply(){
+  if(STATE.applyTarget){
+    const l=STATE.listings.find(x=>x.adHash===STATE.applyTarget.adHash);
+    if(l){l.status='LOCKED';l.apps++}
+    STATE.applications.unshift({
+      appId:rHash(),adHash:STATE.applyTarget.adHash,tenant:'0x9c2f...3a7B',
+      type:STATE.applyTarget.type,escrow:STATE.applyTarget.price*3,
+      status:'PENDING_TRANSFER',expiresAt:Date.now()+STATE.applyTarget.timeout*86400000,proof:true
+    });
+  }
+  cancelApply();
+  switchTab(document.querySelectorAll('#dash-tenant .tab')[1],'ttab','ttab-myapps');
+  renderDashboard();
+}
+
+/* ═══════════════════════ SETTLEMENT ═══════════════════════ */
+function goSettle(adHash){
+  navigate('settlement');
+  const l=STATE.listings.find(x=>x.adHash===adHash);
+  const a=STATE.applications.find(x=>x.adHash===adHash&&x.status==='PENDING_TRANSFER');
+  // Timeline
+  const phases=['Advertise','Register','Apply','Engage','Settle'];
+  const currentPhase=l?.status==='SETTLED'?5:4;
+  document.getElementById('settle-timeline').innerHTML=phases.map((p,i)=>{
+    const cls=i<currentPhase-1?'done':i===currentPhase-1?'current':'';
+    return `<div class="tl-step ${cls}"><div class="tl-dot">${i<currentPhase-1?'&#x2713;':i+1}</div><div class="tl-info"><div class="tl-name">${p}</div><div class="tl-sub">${['Ad_Hash','&Pi;<sub>own</sub>','&Pi;<sub>elig</sub>','Escrow','&Pi;<sub>trans</sub>'][i]}</div></div></div>`;
+  }).join('');
+  if(a){
+    document.getElementById('settle-dep').textContent=a.escrow+' ETH';
+    document.getElementById('settle-bond').textContent=(l?.bond||0.5)+' ETH';
+    document.getElementById('settle-total').textContent=(a.escrow+(l?.bond||0.5)).toFixed(1)+' ETH';
+    document.getElementById('settle-countdown').textContent=daysLeft(a.expiresAt);
+    const exp=new Date(a.expiresAt);
+    document.getElementById('settle-expires').textContent=exp.toISOString().slice(0,10);
+  }
+  document.getElementById('settle-proof-section').classList.add('hidden');
+  document.getElementById('settle-final').classList.add('hidden');
+}
+function confirmSettlement(role){
+  toast(role+' confirmed transfer','success');
+  document.getElementById('settle-proof-section').classList.remove('hidden');
+  const sim=document.getElementById('sim-trans');
+  const lines=sim.querySelectorAll('.sim-line');
+  lines.forEach(l=>{l.classList.remove('visible');l.querySelector('.sim-icon').className='sim-icon pending';l.querySelector('.sim-icon').innerHTML='&#x25CB;'});
+  document.getElementById('settle-final').classList.add('hidden');
+  lines.forEach((line,i)=>{
+    const delay=parseInt(line.dataset.delay);
+    setTimeout(()=>{
+      line.classList.add('visible');
+      setTimeout(()=>{
+        line.querySelector('.sim-icon').className='sim-icon done';
+        line.querySelector('.sim-icon').innerHTML='&#x2713;';
+        if(i===lines.length-1){
+          setTimeout(()=>{
+            document.getElementById('settle-final').classList.remove('hidden');
+            toast('Settlement complete! Funds released.');
+          },500);
+        }
+      },500);
+    },delay);
+  });
+}
+function raiseDispute(role){toast(role+' raised a dispute','error')}
+
+/* ═══════════════════════ PROTOCOL VISUALIZER ═══════════════════════ */
+const VIZ_STEPS=[
+  {id:1,title:'Ownership Data Request',from:'landlord',to:'edevlet',desc:'Landlord queries e-Devlet for property ownership records via HTTPS, embedding a fresh nonce from SC_PPREV.',formula:'P queries S with embedded nonce',priv:['Query parameters','Personal identity'],pub:['Server URL (e-Devlet)','Nonce']},
+  {id:2,title:'Ownership Data Response',from:'edevlet',to:'landlord',desc:'e-Devlet returns the ownership record over the TLS-secured channel.',formula:'S returns ownership record to P',priv:['Full registry extract','Co-owner identities','Acquisition history'],pub:['HTTP response metadata']},
+  {id:3,title:'TLSNotary Proof for Ownership',from:'landlord',to:'notary',desc:'Landlord initiates MPC-TLS session with the Notary Network to produce an authenticated transcript T_proof.',formula:'T_proof ← MPC-TLS(P, S, N)',priv:['Plaintext content of T_proof'],pub:['C_T = Commit(T_proof)','t_auth (timestamp)']},
+  {id:4,title:'Notary Signature for Ownership',from:'notary',to:'landlord',desc:'Notary nodes verify TLSNotary proof and produce a threshold signature over the binding tuple.',formula:'σ ← Combine({σ_i})\nm = H(C_T ‖ Ad_Hash ‖ nonce ‖ t_auth ‖ PolicyID)',priv:['Individual notary key shares sk_i'],pub:['σ (threshold signature)','m (binding tuple hash)']},
+  {id:5,title:'Generate π_own + Ad_Hash',from:'landlord',to:'landlord',desc:'Landlord generates ZK proof π_own proving ownership predicate without revealing PII. Computes Ad_Hash binding listing metadata.',formula:'π_own ← ZKP.Prove(x, w)\nAd_Hash = H(metadata ‖ PolicyID)',priv:['T_proof content','Registry PII','parse_witness'],pub:['π_own','C_T','Ad_Hash','nonce','PolicyID']},
+  {id:6,title:'Verify Proof & Register Listing',from:'landlord',to:'adcontract',desc:'SC_PPREV verifies σ, π_own, freshness, nonce uniqueness, and bond. If all pass, listing is stored as ACTIVE.',formula:'VerifySig(PK_N, σ, m) ∧ ZKP.Verify(vk, π_own, w)\n∧ (now - t_auth ≤ Δ) ∧ NonceUnused(nonce)',priv:['None (all verification is over public inputs)'],pub:['Ad_Hash','ListingStatus = ACTIVE','Bond deposited']},
+  {id:7,title:'Publish Listing',from:'adcontract',to:'tenant',desc:'Listing becomes visible on-chain. Tenant discovers it and reviews policy requirements (PolicyID, required escrow).',formula:'PolicyID, ReqEscrow ← SC.GetListingDetails(Ad_Hash)',priv:['None'],pub:['Ad_Hash','PolicyID','ReqEscrow','Listing metadata']},
+  {id:8,title:'Eligibility Data Request',from:'tenant',to:'edevlet',desc:'Tenant queries e-Devlet (or payroll portal) for eligibility records with embedded nonce_T.',formula:'T queries S with embedded nonce_T',priv:['Query parameters','Tenant identity'],pub:['Server URL','nonce_T']},
+  {id:9,title:'Eligibility Data Response',from:'edevlet',to:'tenant',desc:'Source returns income/employment records over TLS.',formula:'S returns eligibility record to T',priv:['Income amount','Employment details','Tax records'],pub:['HTTP response metadata']},
+  {id:10,title:'TLSNotary Proof for Eligibility',from:'tenant',to:'notary',desc:'Tenant runs MPC-TLS with Notary Network for eligibility transcript.',formula:'T_proof_elig ← MPC-TLS(T, S, N)',priv:['Plaintext eligibility data'],pub:['C_T_elig = Commit(T_proof_elig)','t_auth_T']},
+  {id:11,title:'Notary Signature for Eligibility',from:'notary',to:'tenant',desc:'Notaries sign the tenant-bound tuple including T_addr.',formula:'σ_T ← Combine({σ_i_T})\nm_T = H(C_T_elig ‖ Ad_Hash ‖ nonce_T ‖ t_auth_T ‖ PolicyID ‖ T_addr)',priv:['Notary key shares'],pub:['σ_T','m_T']},
+  {id:12,title:'Freshness Re-verification',from:'tenant',to:'notary',desc:'A final TLSNotary session confirms ownership data and eligibility data are still current (not stale).',formula:'Verify freshness: now - t_auth ≤ Δ_elig',priv:['Updated records'],pub:['Freshness confirmation']},
+  {id:13,title:'Submit Proof to Ad Contract',from:'tenant',to:'adcontract',desc:'Tenant submits π_elig, σ_T, and escrow deposit to SC_PPREV in a single atomic transaction.',formula:'Submit(π_elig, σ_T, C_T_elig, Ad_Hash, dep_escrow)',priv:['None (proof hides PII)'],pub:['π_elig','σ_T','dep_escrow','appId = H(Ad_Hash ‖ T_addr ‖ nonce_T)']},
+  {id:14,title:'Validate Ad_Hash & Proof',from:'adcontract',to:'adcontract',desc:'Smart contract verifies signature, ZK proof, freshness, nonce, escrow amount, and listing status.',formula:'VerifySig ∧ ZKP.Verify ∧ Freshness ∧ NonceUnused\n∧ dep_escrow ≥ ReqEscrow ∧ Status(Ad_Hash) == ACTIVE',priv:['None'],pub:['All verification results (boolean)']},
+  {id:15,title:'Lock Listing → PENDING',from:'adcontract',to:'escrow',desc:'Listing transitions to LOCKED. Application record created. Escrow funds locked with timeout.',formula:'ListingStatus(Ad_Hash) ← LOCKED\nApplication[appId] ← (T_addr, dep_escrow, PENDING_TRANSFER, expires_at)',priv:['None'],pub:['ListingStatus = LOCKED','appId','expires_at = now + τ_lock']},
+  {id:16,title:'Transfer Proof (π_trans)',from:'landlord',to:'escrow',desc:'After off-chain transfer (key handover / deed), landlord proves via TLSNotary + ZK that registry now reflects the tenant/buyer.',formula:'π_trans: φ_trans enforces H(registry_tenant) == H(T_addr)\nm_trans = H(C_T_trans ‖ Ad_Hash ‖ appId ‖ nonce_trans ‖ t_auth_trans ‖ SC_addr ‖ chain_id)',priv:['Registry content','Personal identifiers'],pub:['π_trans','σ_trans','Boolean: transfer confirmed']},
+  {id:17,title:'Settlement & Escrow Release',from:'escrow',to:'landlord',desc:'SC_PPREV verifies π_trans, transitions both statuses to SETTLED, and atomically releases escrow + bond to landlord/seller.',formula:'AppStatus ← SETTLED\nListingStatus ← SETTLED\nTransfer(dep_escrow + B_req → P_addr)',priv:['None'],pub:['SETTLED state','Funds released to P_addr']},
+];
+
+const ACTOR_MAP={tenant:'a-tenant',landlord:'a-landlord',edevlet:'a-edevlet',notary:'a-notary',adcontract:'a-adcontract',escrow:'a-escrow'};
+
+function renderVizStep(){
+  const step=VIZ_STEPS[STATE.vizStep-1];
+  document.getElementById('viz-step-label').textContent=`Step ${step.id} / 17`;
+  document.getElementById('viz-progress').style.width=(step.id/17*100)+'%';
+  document.getElementById('viz-detail-title').textContent=`Step ${step.id}: ${step.title}`;
+  document.getElementById('viz-detail-desc').textContent=step.desc;
+  document.getElementById('viz-detail-formula').innerHTML=step.formula.replace(/\n/g,'<br>');
+  document.getElementById('viz-private').innerHTML=step.priv.map(p=>`<li>${p}</li>`).join('');
+  document.getElementById('viz-public').innerHTML=step.pub.map(p=>`<li>${p}</li>`).join('');
+  // Highlight actors
+  document.querySelectorAll('.viz-actor').forEach(a=>a.classList.remove('highlight'));
+  if(ACTOR_MAP[step.from])document.querySelector('.'+ACTOR_MAP[step.from])?.classList.add('highlight');
+  if(ACTOR_MAP[step.to]&&step.to!==step.from)document.querySelector('.'+ACTOR_MAP[step.to])?.classList.add('highlight');
+  drawVizLines(step);
+}
+function drawVizLines(step){
+  const svg=document.getElementById('viz-svg');
+  const container=document.getElementById('viz-actors');
+  const rect=container.getBoundingClientRect();
+  svg.setAttribute('width',rect.width);
+  svg.setAttribute('height',rect.height);
+  // Simple connection line between from/to actors
+  const fromEl=container.querySelector('.'+ACTOR_MAP[step.from]);
+  const toEl=container.querySelector('.'+ACTOR_MAP[step.to]);
+  if(!fromEl||!toEl){svg.innerHTML='';return}
+  const fr=fromEl.getBoundingClientRect();
+  const tr=toEl.getBoundingClientRect();
+  const cr=container.getBoundingClientRect();
+  const x1=fr.left-cr.left+fr.width/2;
+  const y1=fr.top-cr.top+fr.height/2;
+  const x2=tr.left-cr.left+tr.width/2;
+  const y2=tr.top-cr.top+tr.height/2;
+  svg.innerHTML=`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="active" stroke-dasharray="8 4"><animate attributeName="stroke-dashoffset" from="24" to="0" dur="1s" repeatCount="indefinite"/></line>`;
+}
+function vizPrev(){if(STATE.vizStep>1){STATE.vizStep--;renderVizStep()}}
+function vizNext(){if(STATE.vizStep<17){STATE.vizStep++;renderVizStep()}}
+function vizAutoPlay(){
+  if(STATE.vizPlaying){
+    STATE.vizPlaying=false;
+    document.getElementById('viz-autoplay').innerHTML='&#x25B6; Auto-Play';
+    return;
+  }
+  STATE.vizPlaying=true;
+  document.getElementById('viz-autoplay').innerHTML='&#x23F8; Pause';
+  STATE.vizStep=1;renderVizStep();
+  const iv=setInterval(()=>{
+    if(!STATE.vizPlaying||STATE.vizStep>=17){
+      clearInterval(iv);STATE.vizPlaying=false;
+      document.getElementById('viz-autoplay').innerHTML='&#x25B6; Auto-Play';
+      return;
+    }
+    STATE.vizStep++;renderVizStep();
+  },2500);
+}
+
+/* ═══════════════════════ INIT ═══════════════════════ */
+function init(){
+  seedData();
+  const hash=window.location.hash.replace('#','');
+  if(hash&&document.getElementById('page-'+hash)){
+    navigate(hash);
+  }
+  renderVizStep();
+}
+window.addEventListener('hashchange',()=>{
+  const h=window.location.hash.replace('#','');
+  if(h&&h!==STATE.currentPage)navigate(h);
+});
+window.addEventListener('resize',()=>{if(STATE.currentPage==='visualizer')renderVizStep()});
+init();
+</script>
+</body>
+</html>
