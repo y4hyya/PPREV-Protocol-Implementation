@@ -1,0 +1,18 @@
+# ──────────────────────────────────────────────────────────────
+#  PPREV Protocol — Docker Compose
+# ──────────────────────────────────────────────────────────────
+#  Quick commands:
+#    docker compose up --build        → Run full simulation
+#    docker compose run pprev deploy  → Deploy only
+#    docker compose run pprev test    → Run Hardhat tests
+# ──────────────────────────────────────────────────────────────
+
+services:
+  pprev:
+    build: .
+    container_name: pprev-simulation
+    # Override default command with: docker compose run pprev <cmd>
+    # Examples:
+    #   npx hardhat run scripts/deploy.ts
+    #   npx hardhat run scripts/simulate.ts
+    #   npx hardhat test

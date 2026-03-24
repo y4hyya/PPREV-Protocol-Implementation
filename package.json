@@ -1,0 +1,20 @@
+{
+  "name": "pprev-protocol-simulation",
+  "version": "1.0.0",
+  "description": "PPREV Protocol — Docker-based Hardhat simulation environment",
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.ts",
+    "simulate": "hardhat run scripts/simulate.ts",
+    "test": "hardhat test",
+    "clean": "hardhat clean"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "hardhat": "^2.22.0",
+    "typescript": "^5.4.0",
+    "ts-node": "^10.9.0",
+    "@types/node": "^20.0.0"
+  }
+}
