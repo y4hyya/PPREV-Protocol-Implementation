@@ -175,8 +175,8 @@ async function main() {
 
     // ── Compute real notary signature ──
     const sigMessageListing = ethers.solidityPackedKeccak256(
-        ["bytes32", "bytes32", "bytes32", "uint256", "bytes32"],
-        [adHash, policyId, transcriptListing, timestampListing, nonceListing],
+        ["address", "bytes32", "bytes32", "bytes32", "uint256", "bytes32"],
+        [landlord.address, adHash, policyId, transcriptListing, timestampListing, nonceListing],
     );
     const thresholdSigListing = await signNotary(sigMessageListing);
     log("Notary signature", thresholdSigListing.slice(0, 20) + "…");
@@ -234,8 +234,8 @@ async function main() {
 
     // ── Compute real notary signature ──
     const sigMessageApply = ethers.solidityPackedKeccak256(
-        ["bytes32", "bytes32", "bytes32", "uint256", "bytes32"],
-        [adHash, policyId, transcriptTenant, timestampApply, nonceApply],
+        ["address", "bytes32", "bytes32", "bytes32", "uint256", "bytes32"],
+        [tenant.address, adHash, policyId, transcriptTenant, timestampApply, nonceApply],
     );
     const thresholdSigApply = await signNotary(sigMessageApply);
     log("Notary signature", thresholdSigApply.slice(0, 20) + "…");
@@ -303,8 +303,8 @@ async function main() {
 
     // ── Compute real notary signature ──
     const sigMessageSettle = ethers.solidityPackedKeccak256(
-        ["bytes32", "bytes32", "uint256", "bytes32"],
-        [appId, transcriptSettle, timestampSettle, nonceSettle],
+        ["address", "bytes32", "bytes32", "uint256", "bytes32"],
+        [landlord.address, appId, transcriptSettle, timestampSettle, nonceSettle],
     );
     const thresholdSigSettle = await signNotary(sigMessageSettle);
     log("Notary signature", thresholdSigSettle.slice(0, 20) + "…");

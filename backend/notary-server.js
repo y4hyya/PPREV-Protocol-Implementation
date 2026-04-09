@@ -194,12 +194,12 @@ app.post('/notary/attest-listing', async (req, res) => {
 
   console.log(`  ✓ Landlord verified: ${record.ad} (${record.properties.length} property/properties)`);
 
-  // ── Build message (must match contract: keccak256(adHash‖policyId‖transcript‖ts‖nonce)) ──
+  // ── Build message (must match contract: keccak256(caller‖adHash‖policyId‖transcript‖ts‖nonce)) ──
   let msgHash;
   try {
     msgHash = ethers.solidityPackedKeccak256(
-      ['bytes32', 'bytes32', 'bytes32', 'uint256', 'bytes32'],
-      [adHash, policyId, transcriptCommitment, BigInt(timestamp), nonce]
+      ['address', 'bytes32', 'bytes32', 'bytes32', 'uint256', 'bytes32'],
+      [addr, adHash, policyId, transcriptCommitment, BigInt(timestamp), nonce]
     );
   } catch (err) {
     return reject(res, 400, `Invalid bytes32 field: ${err.shortMessage || err.message}`);
@@ -257,8 +257,8 @@ app.post('/notary/attest-application', async (req, res) => {
   let msgHash2;
   try {
     msgHash2 = ethers.solidityPackedKeccak256(
-      ['bytes32', 'bytes32', 'bytes32', 'uint256', 'bytes32'],
-      [adHash, policyId, transcriptCommitment, BigInt(timestamp), nonce]
+      ['address', 'bytes32', 'bytes32', 'bytes32', 'uint256', 'bytes32'],
+      [addr, adHash, policyId, transcriptCommitment, BigInt(timestamp), nonce]
     );
   } catch (err) {
     return reject(res, 400, `Invalid bytes32 field: ${err.shortMessage || err.message}`);
@@ -294,12 +294,12 @@ app.post('/notary/attest-settlement', async (req, res) => {
 
   console.log(`  ✓ Settlement by: ${record.ad}`);
 
-  // Settlement message: keccak256(appId‖transcript‖timestamp‖nonce)
+  // Settlement message: keccak256(caller‖appId‖transcript‖timestamp‖nonce)
   let msgHash;
   try {
     msgHash = ethers.solidityPackedKeccak256(
-      ['bytes32', 'bytes32', 'uint256', 'bytes32'],
-      [appId, transcriptCommitment, BigInt(timestamp), nonce]
+      ['address', 'bytes32', 'bytes32', 'uint256', 'bytes32'],
+      [addr, appId, transcriptCommitment, BigInt(timestamp), nonce]
     );
   } catch (err) {
     return reject(res, 400, `Invalid bytes32 field: ${err.shortMessage || err.message}`);

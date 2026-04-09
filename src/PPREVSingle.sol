@@ -441,9 +441,10 @@ contract PPREVSingle is ReentrancyGuard {
         _verifyFreshness(_timestamp);
 
         // Build message for threshold-sig verification:
-        // hash(adHash, policyId, transcriptCommitment, timestamp, nonce)
+        // hash(caller, adHash, policyId, transcriptCommitment, timestamp, nonce)
         bytes32 sigMessage = keccak256(
             abi.encodePacked(
+                msg.sender,
                 _adHash,
                 _policyId,
                 _transcriptCommitment,
@@ -533,6 +534,7 @@ contract PPREVSingle is ReentrancyGuard {
 
         bytes32 sigMessage = keccak256(
             abi.encodePacked(
+                msg.sender,
                 _adHash,
                 _policyId,
                 _transcriptCommitment,
@@ -610,7 +612,13 @@ contract PPREVSingle is ReentrancyGuard {
         }
 
         bytes32 sigMessage = keccak256(
-            abi.encodePacked(_appId, _transcriptCommitment, _timestamp, _nonce)
+            abi.encodePacked(
+                msg.sender,
+                _appId,
+                _transcriptCommitment,
+                _timestamp,
+                _nonce
+            )
         );
         _verifyZKProof(_zkProof, _zkInputs);
         _verifyThresholdSig(sigMessage, _thresholdSig);
