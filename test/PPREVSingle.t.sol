@@ -38,11 +38,7 @@ contract PPREVSingleTest is Test {
 
         // Deploy protocol
         protocol = new PPREVSingle(
-            address(zkVerifier),
-            address(sigVerifier),
-            FRESHNESS_WINDOW,
-            EXPIRY_TIMEOUT,
-            MIN_COLLATERAL
+            address(zkVerifier), address(sigVerifier), FRESHNESS_WINDOW, EXPIRY_TIMEOUT, MIN_COLLATERAL
         );
 
         // Whitelist the test policy
@@ -74,85 +70,45 @@ contract PPREVSingleTest is Test {
         // ── Phase 1: Register listing ──
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         PPREVSingle.Listing memory listing = protocol.getListing(AD_HASH);
-        assertEq(
-            uint256(listing.status),
-            uint256(PPREVSingle.ListingStatus.ACTIVE)
-        );
+        assertEq(uint256(listing.status), uint256(PPREVSingle.ListingStatus.ACTIVE));
         assertEq(listing.owner, lister);
         assertEq(listing.collateral, 0.1 ether);
 
         // ── Phase 2: Application ──
         vm.prank(applicant);
         protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce2,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         // Derive expected appId
-        bytes32 expectedAppId = keccak256(
-            abi.encodePacked(AD_HASH, applicant, nonce2)
-        );
+        bytes32 expectedAppId = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
 
-        PPREVSingle.Application memory app = protocol.getApplication(
-            expectedAppId
-        );
-        assertEq(
-            uint256(app.status),
-            uint256(PPREVSingle.ApplicationStatus.PENDING_TRANSFER)
-        );
+        PPREVSingle.Application memory app = protocol.getApplication(expectedAppId);
+        assertEq(uint256(app.status), uint256(PPREVSingle.ApplicationStatus.PENDING_TRANSFER));
         assertEq(app.applicant, applicant);
         assertEq(app.escrowAmount, 0.05 ether);
 
         // Listing should be LOCKED
         listing = protocol.getListing(AD_HASH);
-        assertEq(
-            uint256(listing.status),
-            uint256(PPREVSingle.ListingStatus.LOCKED)
-        );
+        assertEq(uint256(listing.status), uint256(PPREVSingle.ListingStatus.LOCKED));
 
         // ── Phase 3: Settlement ──
         uint256 listerBalBefore = lister.balance;
 
         vm.prank(lister);
         protocol.settleListing(
-            expectedAppId,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce3,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            expectedAppId, TRANSCRIPT_COMMIT, block.timestamp, nonce3, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         app = protocol.getApplication(expectedAppId);
-        assertEq(
-            uint256(app.status),
-            uint256(PPREVSingle.ApplicationStatus.SETTLED)
-        );
+        assertEq(uint256(app.status), uint256(PPREVSingle.ApplicationStatus.SETTLED));
 
         listing = protocol.getListing(AD_HASH);
-        assertEq(
-            uint256(listing.status),
-            uint256(PPREVSingle.ListingStatus.SETTLED)
-        );
+        assertEq(uint256(listing.status), uint256(PPREVSingle.ListingStatus.SETTLED));
 
         // Lister should have received escrow (0.05) + collateral (0.1) = 0.15 ether
         uint256 listerBalAfter = lister.balance;
@@ -174,28 +130,13 @@ contract PPREVSingleTest is Test {
         // Register
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         // Apply
         vm.prank(applicant);
         protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce2,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         bytes32 appId = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
@@ -215,17 +156,11 @@ contract PPREVSingleTest is Test {
         protocol.expireApplication(appId);
 
         PPREVSingle.Application memory app = protocol.getApplication(appId);
-        assertEq(
-            uint256(app.status),
-            uint256(PPREVSingle.ApplicationStatus.EXPIRED)
-        );
+        assertEq(uint256(app.status), uint256(PPREVSingle.ApplicationStatus.EXPIRED));
 
         // Listing should be ACTIVE again
         PPREVSingle.Listing memory listing = protocol.getListing(AD_HASH);
-        assertEq(
-            uint256(listing.status),
-            uint256(PPREVSingle.ListingStatus.ACTIVE)
-        );
+        assertEq(uint256(listing.status), uint256(PPREVSingle.ListingStatus.ACTIVE));
 
         // Applicant should have received escrow + 10% slash of collateral
         uint256 slashAmount = 0.01 ether; // 10% of 0.1 ether
@@ -233,7 +168,6 @@ contract PPREVSingleTest is Test {
         assertEq(applicantBalAfter - applicantBalBefore, 0.05 ether + slashAmount);
 
         // Escrow field should be zeroed after transfer
-        PPREVSingle.Application memory app = protocol.getApplication(appId);
         assertEq(app.escrowAmount, 0);
     }
 
@@ -246,33 +180,15 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         // Second listing with same nonce should revert
         bytes32 adHash2 = keccak256("ad-hash-2");
-        vm.expectRevert(
-            abi.encodeWithSelector(PPREVSingle.NonceAlreadyUsed.selector, nonce)
-        );
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.NonceAlreadyUsed.selector, nonce));
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            adHash2,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            adHash2, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
     }
 
@@ -283,24 +199,10 @@ contract PPREVSingleTest is Test {
     function test_RevertInsufficientCollateral() public {
         bytes32 nonce = keccak256("nonce-low-col");
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                PPREVSingle.InsufficientCollateral.selector,
-                0.01 ether,
-                MIN_COLLATERAL
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.InsufficientCollateral.selector, 0.01 ether, MIN_COLLATERAL));
         vm.prank(lister);
         protocol.registerListing{value: 0.01 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
     }
 
@@ -318,15 +220,7 @@ contract PPREVSingleTest is Test {
         vm.expectRevert();
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            staleTimestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, staleTimestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
     }
 
@@ -338,23 +232,10 @@ contract PPREVSingleTest is Test {
         bytes32 nonce = keccak256("nonce-bad-policy");
         bytes32 badPolicy = keccak256("unknown-policy");
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                PPREVSingle.PolicyNotWhitelisted.selector,
-                badPolicy
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.PolicyNotWhitelisted.selector, badPolicy));
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            badPolicy,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, badPolicy, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
     }
 
@@ -370,49 +251,22 @@ contract PPREVSingleTest is Test {
         // Register
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         // Apply
         vm.prank(applicant);
         protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce2,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         bytes32 appId = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
 
         // Non-owner tries to settle
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                PPREVSingle.CallerNotListingOwner.selector,
-                anyone,
-                lister
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.CallerNotListingOwner.selector, anyone, lister));
         vm.prank(anyone);
         protocol.settleListing(
-            appId,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce3,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            appId, TRANSCRIPT_COMMIT, block.timestamp, nonce3, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
     }
 
@@ -426,29 +280,14 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         // Lister tries to apply to their own listing
         vm.expectRevert(PPREVSingle.CannotApplyToOwnListing.selector);
         vm.prank(lister);
         protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce2,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
     }
 
@@ -463,58 +302,26 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         vm.prank(applicant);
         protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce2,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
-        bytes32 appId = keccak256(
-            abi.encodePacked(AD_HASH, applicant, nonce2)
-        );
+        bytes32 appId = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
 
         // Warp past expiry
         vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
 
         // Settle should revert with ApplicationExpiredCannotSettle, not ApplicationNotPending
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                PPREVSingle.ApplicationExpiredCannotSettle.selector,
-                appId
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ApplicationExpiredCannotSettle.selector, appId));
         vm.prank(lister);
         protocol.settleListing(
-            appId,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce3,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            appId, TRANSCRIPT_COMMIT, block.timestamp, nonce3, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
     }
-
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Admin functions
-    // ════════════════════════════════════════════════════════════════════════
 
     // ════════════════════════════════════════════════════════════════════════
     //  Test: Cancel Listing
@@ -525,15 +332,7 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         uint256 listerBalBefore = lister.balance;
@@ -542,10 +341,7 @@ contract PPREVSingleTest is Test {
         protocol.cancelListing(AD_HASH);
 
         PPREVSingle.Listing memory listing = protocol.getListing(AD_HASH);
-        assertEq(
-            uint256(listing.status),
-            uint256(PPREVSingle.ListingStatus.CANCELLED)
-        );
+        assertEq(uint256(listing.status), uint256(PPREVSingle.ListingStatus.CANCELLED));
 
         // Collateral should be returned
         uint256 listerBalAfter = lister.balance;
@@ -560,24 +356,10 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                PPREVSingle.CallerNotListingOwner.selector,
-                anyone,
-                lister
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.CallerNotListingOwner.selector, anyone, lister));
         vm.prank(anyone);
         protocol.cancelListing(AD_HASH);
     }
@@ -588,35 +370,15 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         vm.prank(applicant);
         protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce2,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                PPREVSingle.ListingNotActive.selector,
-                AD_HASH
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ListingNotActive.selector, AD_HASH));
         vm.prank(lister);
         protocol.cancelListing(AD_HASH);
     }
@@ -632,36 +394,19 @@ contract PPREVSingleTest is Test {
         // Register
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         // Apply
         vm.prank(applicant);
         protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce2,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         // Warp past expiry
         vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
 
-        bytes32 appId = keccak256(
-            abi.encodePacked(AD_HASH, applicant, nonce2)
-        );
+        bytes32 appId = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
         vm.prank(anyone);
         protocol.expireApplication(appId);
 
@@ -721,63 +466,34 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         // ── Cycle 1: apply → expire ──
         bytes32 nonce2 = keccak256("nonce-maxexp-app1");
         vm.prank(applicant);
         protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce2,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
-        bytes32 appId1 = keccak256(
-            abi.encodePacked(AD_HASH, applicant, nonce2)
-        );
+        bytes32 appId1 = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
         vm.prank(anyone);
         protocol.expireApplication(appId1);
 
         // After 1st expiration: listing should still be ACTIVE
         PPREVSingle.Listing memory listing1 = protocol.getListing(AD_HASH);
-        assertEq(
-            uint256(listing1.status),
-            uint256(PPREVSingle.ListingStatus.ACTIVE)
-        );
+        assertEq(uint256(listing1.status), uint256(PPREVSingle.ListingStatus.ACTIVE));
 
         // ── Cycle 2: apply → expire (should auto-cancel) ──
         bytes32 nonce3 = keccak256("nonce-maxexp-app2");
         vm.prank(applicant);
         protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce3,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce3, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
 
         vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
-        bytes32 appId2 = keccak256(
-            abi.encodePacked(AD_HASH, applicant, nonce3)
-        );
+        bytes32 appId2 = keccak256(abi.encodePacked(AD_HASH, applicant, nonce3));
 
         uint256 listerBalBefore = lister.balance;
         vm.prank(anyone);
@@ -785,10 +501,7 @@ contract PPREVSingleTest is Test {
 
         // After 2nd expiration: listing should be CANCELLED
         PPREVSingle.Listing memory listing2 = protocol.getListing(AD_HASH);
-        assertEq(
-            uint256(listing2.status),
-            uint256(PPREVSingle.ListingStatus.CANCELLED)
-        );
+        assertEq(uint256(listing2.status), uint256(PPREVSingle.ListingStatus.CANCELLED));
         // Remaining collateral should be zero (returned to owner)
         assertEq(listing2.collateral, 0);
 
@@ -807,15 +520,7 @@ contract PPREVSingleTest is Test {
         vm.expectRevert(PPREVSingle.InvalidEscrowAmount.selector);
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            0, // zero reqEscrow
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+            AD_HASH, POLICY_ID, 0, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
     }
 }

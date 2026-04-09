@@ -18,13 +18,9 @@ pragma solidity ^0.8.24;
  * ============================================================================
  */
 
-import {
-    ReentrancyGuard
-} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {
-    MessageHashUtils
-} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 // ============================================================================
 //  SECTION 1: Verifier Interfaces
@@ -35,10 +31,7 @@ interface IZKVerifier {
     /// @param proof   Encoded ZK proof bytes.
     /// @param inputs  Public inputs to the proof circuit.
     /// @return valid  True when the proof verifies against `inputs`.
-    function verifyProof(
-        bytes calldata proof,
-        bytes32[] calldata inputs
-    ) external view returns (bool valid);
+    function verifyProof(bytes calldata proof, bytes32[] calldata inputs) external view returns (bool valid);
 }
 
 /// @notice Interface for threshold-signature verification.
@@ -46,10 +39,7 @@ interface IThresholdSigVerifier {
     /// @param message   The message that was signed.
     /// @param signature Aggregated threshold signature bytes.
     /// @return valid    True when the signature is valid for `message`.
-    function verifySignature(
-        bytes32 message,
-        bytes calldata signature
-    ) external view returns (bool valid);
+    function verifySignature(bytes32 message, bytes calldata signature) external view returns (bool valid);
 }
 
 // ============================================================================
@@ -60,9 +50,15 @@ interface IThresholdSigVerifier {
 /// @notice Always-pass stub for ZK proof verification. NEVER use in production.
 contract MockZKVerifier is IZKVerifier {
     function verifyProof(
-        bytes calldata /* proof */,
+        bytes calldata,
+        /* proof */
         bytes32[] calldata /* inputs */
-    ) external pure override returns (bool) {
+    )
+        external
+        pure
+        override
+        returns (bool)
+    {
         return true;
     }
 }
@@ -71,9 +67,15 @@ contract MockZKVerifier is IZKVerifier {
 /// @notice Always-pass stub for threshold-signature verification. NEVER use in production.
 contract MockThresholdSignatureVerifier is IThresholdSigVerifier {
     function verifySignature(
-        bytes32 /* message */,
+        bytes32,
+        /* message */
         bytes calldata /* signature */
-    ) external pure override returns (bool) {
+    )
+        external
+        pure
+        override
+        returns (bool)
+    {
         return true;
     }
 }
@@ -93,13 +95,8 @@ contract ECDSANotaryVerifier is IThresholdSigVerifier {
 
     /// @notice Verify that `signature` over `message` was produced by the notary.
     /// @dev Applies EIP-191 prefix before ecrecover, matching ethers.js signMessage().
-    function verifySignature(
-        bytes32 message,
-        bytes calldata signature
-    ) external view override returns (bool) {
-        bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(
-            message
-        );
+    function verifySignature(bytes32 message, bytes calldata signature) external view override returns (bool) {
+        bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(message);
         address recovered = ECDSA.recover(ethSignedHash, signature);
         return recovered == notaryAddress;
     }
@@ -192,18 +189,11 @@ contract PPREVSingle is ReentrancyGuard {
     // ────────────────────────────────────────────────────────────────────────
 
     event ListingRegistered(
-        bytes32 indexed adHash,
-        address indexed owner,
-        bytes32 policyId,
-        uint256 reqEscrow,
-        uint256 collateral
+        bytes32 indexed adHash, address indexed owner, bytes32 policyId, uint256 reqEscrow, uint256 collateral
     );
 
     event ApplicationCreated(
-        bytes32 indexed appId,
-        bytes32 indexed adHash,
-        address indexed applicant,
-        uint256 escrowAmount
+        bytes32 indexed appId, bytes32 indexed adHash, address indexed applicant, uint256 escrowAmount
     );
 
     event ApplicationSettled(
@@ -222,11 +212,7 @@ contract PPREVSingle is ReentrancyGuard {
         uint256 slashAmount
     );
 
-    event ListingCancelled(
-        bytes32 indexed adHash,
-        address indexed owner,
-        uint256 collateralReturned
-    );
+    event ListingCancelled(bytes32 indexed adHash, address indexed owner, uint256 collateralReturned);
 
     event VerifierUpdated(string verifierType, address newAddress);
     event PolicyWhitelisted(bytes32 indexed policyId, bool allowed);
@@ -319,9 +305,7 @@ contract PPREVSingle is ReentrancyGuard {
     }
 
     /// @notice Update the threshold-signature verifier contract address.
-    function setThresholdVerifier(
-        address _thresholdVerifier
-    ) external onlyOwner {
+    function setThresholdVerifier(address _thresholdVerifier) external onlyOwner {
         if (_thresholdVerifier == address(0)) revert InvalidVerifierAddress();
         thresholdVerifier = IThresholdSigVerifier(_thresholdVerifier);
         emit VerifierUpdated("ThresholdVerifier", _thresholdVerifier);
@@ -352,10 +336,7 @@ contract PPREVSingle is ReentrancyGuard {
     }
 
     /// @notice Whitelist or un-whitelist a policy.
-    function whitelistPolicy(
-        bytes32 _policyId,
-        bool _allowed
-    ) external onlyOwner {
+    function whitelistPolicy(bytes32 _policyId, bool _allowed) external onlyOwner {
         whitelistedPolicies[_policyId] = _allowed;
         emit PolicyWhitelisted(_policyId, _allowed);
     }
@@ -378,20 +359,14 @@ contract PPREVSingle is ReentrancyGuard {
     }
 
     /// @dev Delegates to the ZK verifier contract.
-    function _verifyZKProof(
-        bytes calldata _proof,
-        bytes32[] calldata _inputs
-    ) internal view {
+    function _verifyZKProof(bytes calldata _proof, bytes32[] calldata _inputs) internal view {
         if (!zkVerifier.verifyProof(_proof, _inputs)) {
             revert InvalidZKProof();
         }
     }
 
     /// @dev Delegates to the threshold-signature verifier contract.
-    function _verifyThresholdSig(
-        bytes32 _message,
-        bytes calldata _signature
-    ) internal view {
+    function _verifyThresholdSig(bytes32 _message, bytes calldata _signature) internal view {
         if (!thresholdVerifier.verifySignature(_message, _signature)) {
             revert InvalidThresholdSignature();
         }
@@ -442,16 +417,8 @@ contract PPREVSingle is ReentrancyGuard {
 
         // Build message for threshold-sig verification:
         // hash(caller, adHash, policyId, transcriptCommitment, timestamp, nonce)
-        bytes32 sigMessage = keccak256(
-            abi.encodePacked(
-                msg.sender,
-                _adHash,
-                _policyId,
-                _transcriptCommitment,
-                _timestamp,
-                _nonce
-            )
-        );
+        bytes32 sigMessage =
+            keccak256(abi.encodePacked(msg.sender, _adHash, _policyId, _transcriptCommitment, _timestamp, _nonce));
         _verifyZKProof(_zkProof, _zkInputs);
         _verifyThresholdSig(sigMessage, _thresholdSig);
 
@@ -468,13 +435,7 @@ contract PPREVSingle is ReentrancyGuard {
             expirationCount: 0
         });
 
-        emit ListingRegistered(
-            _adHash,
-            msg.sender,
-            _policyId,
-            _reqEscrow,
-            msg.value
-        );
+        emit ListingRegistered(_adHash, msg.sender, _policyId, _reqEscrow, msg.value);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -518,30 +479,18 @@ contract PPREVSingle is ReentrancyGuard {
         }
 
         // Derive appId
-        bytes32 appId = keccak256(
-            abi.encodePacked(_adHash, msg.sender, _nonce)
-        );
+        bytes32 appId = keccak256(abi.encodePacked(_adHash, msg.sender, _nonce));
 
         // No duplicate active application by same applicant for the same listing
         if (activeApplications[_adHash][msg.sender] != bytes32(0)) {
-            revert DuplicateApplication(
-                activeApplications[_adHash][msg.sender]
-            );
+            revert DuplicateApplication(activeApplications[_adHash][msg.sender]);
         }
 
         _consumeNonce(_nonce);
         _verifyFreshness(_timestamp);
 
-        bytes32 sigMessage = keccak256(
-            abi.encodePacked(
-                msg.sender,
-                _adHash,
-                _policyId,
-                _transcriptCommitment,
-                _timestamp,
-                _nonce
-            )
-        );
+        bytes32 sigMessage =
+            keccak256(abi.encodePacked(msg.sender, _adHash, _policyId, _transcriptCommitment, _timestamp, _nonce));
         _verifyZKProof(_zkProof, _zkInputs);
         _verifyThresholdSig(sigMessage, _thresholdSig);
 
@@ -611,15 +560,7 @@ contract PPREVSingle is ReentrancyGuard {
             revert ApplicationExpiredCannotSettle(_appId);
         }
 
-        bytes32 sigMessage = keccak256(
-            abi.encodePacked(
-                msg.sender,
-                _appId,
-                _transcriptCommitment,
-                _timestamp,
-                _nonce
-            )
-        );
+        bytes32 sigMessage = keccak256(abi.encodePacked(msg.sender, _appId, _transcriptCommitment, _timestamp, _nonce));
         _verifyZKProof(_zkProof, _zkInputs);
         _verifyThresholdSig(sigMessage, _thresholdSig);
 
@@ -637,22 +578,14 @@ contract PPREVSingle is ReentrancyGuard {
 
         // --- Interactions (checks-effects-interactions) ---
         // Transfer escrowed ETH → listing owner
-        (bool s1, ) = payable(listing.owner).call{value: escrowToTransfer}("");
+        (bool s1,) = payable(listing.owner).call{value: escrowToTransfer}("");
         if (!s1) revert TransferFailed();
 
         // Return collateral → listing owner (they posted it)
-        (bool s2, ) = payable(listing.owner).call{value: collateralToReturn}(
-            ""
-        );
+        (bool s2,) = payable(listing.owner).call{value: collateralToReturn}("");
         if (!s2) revert TransferFailed();
 
-        emit ApplicationSettled(
-            _appId,
-            app.adHash,
-            app.applicant,
-            escrowToTransfer,
-            collateralToReturn
-        );
+        emit ApplicationSettled(_appId, app.adHash, app.applicant, escrowToTransfer, collateralToReturn);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -705,32 +638,18 @@ contract PPREVSingle is ReentrancyGuard {
 
         // --- Interactions ---
         // Return escrow + slash penalty to applicant
-        (bool success, ) = payable(app.applicant).call{
-            value: escrowToReturn + slashAmount
-        }("");
+        (bool success,) = payable(app.applicant).call{value: escrowToReturn + slashAmount}("");
         if (!success) revert TransferFailed();
 
-        emit ApplicationExpired(
-            _appId,
-            app.adHash,
-            app.applicant,
-            escrowToReturn,
-            slashAmount
-        );
+        emit ApplicationExpired(_appId, app.adHash, app.applicant, escrowToReturn, slashAmount);
 
         // If auto-cancelled, return remaining collateral to listing owner
         if (autoCancelled) {
             if (remainingCollateral > 0) {
-                (bool s2, ) = payable(listing.owner).call{
-                    value: remainingCollateral
-                }("");
+                (bool s2,) = payable(listing.owner).call{value: remainingCollateral}("");
                 if (!s2) revert TransferFailed();
             }
-            emit ListingCancelled(
-                app.adHash,
-                listing.owner,
-                remainingCollateral
-            );
+            emit ListingCancelled(app.adHash, listing.owner, remainingCollateral);
         }
     }
 
@@ -757,9 +676,7 @@ contract PPREVSingle is ReentrancyGuard {
         listing.collateral = 0;
 
         // --- Interactions ---
-        (bool success, ) = payable(listing.owner).call{
-            value: collateralToReturn
-        }("");
+        (bool success,) = payable(listing.owner).call{value: collateralToReturn}("");
         if (!success) revert TransferFailed();
 
         emit ListingCancelled(_adHash, listing.owner, collateralToReturn);
@@ -770,16 +687,12 @@ contract PPREVSingle is ReentrancyGuard {
     // ════════════════════════════════════════════════════════════════════════
 
     /// @notice Retrieve full listing details.
-    function getListing(
-        bytes32 _adHash
-    ) external view returns (Listing memory) {
+    function getListing(bytes32 _adHash) external view returns (Listing memory) {
         return listings[_adHash];
     }
 
     /// @notice Retrieve full application details.
-    function getApplication(
-        bytes32 _appId
-    ) external view returns (Application memory) {
+    function getApplication(bytes32 _appId) external view returns (Application memory) {
         return applications[_appId];
     }
 
@@ -789,9 +702,7 @@ contract PPREVSingle is ReentrancyGuard {
     }
 
     /// @notice Check whether a policy is whitelisted.
-    function isPolicyWhitelisted(
-        bytes32 _policyId
-    ) external view returns (bool) {
+    function isPolicyWhitelisted(bytes32 _policyId) external view returns (bool) {
         return whitelistedPolicies[_policyId];
     }
 }
