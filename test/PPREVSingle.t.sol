@@ -583,6 +583,9 @@ contract PPREVSingleTest is Test {
         protocol.setExpiryTimeout(7200);
         assertEq(protocol.expiryTimeout(), 7200);
 
+        protocol.setMaxExpirations(10);
+        assertEq(protocol.maxExpirations(), 10);
+
         // Whitelist / un-whitelist
         bytes32 newPolicy = keccak256("new-policy");
         protocol.whitelistPolicy(newPolicy, true);
@@ -590,5 +593,115 @@ contract PPREVSingleTest is Test {
 
         protocol.whitelistPolicy(newPolicy, false);
         assertFalse(protocol.isPolicyWhitelisted(newPolicy));
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Test: Max expirations auto-cancels listing
+    // ════════════════════════════════════════════════════════════════════════
+
+    function test_MaxExpirationsAutoCancels() public {
+        // Set maxExpirations to 2 for faster test
+        protocol.setMaxExpirations(2);
+
+        bytes32 nonce1 = keccak256("nonce-maxexp-reg");
+
+        vm.prank(lister);
+        protocol.registerListing{value: 0.1 ether}(
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+
+        // ── Cycle 1: apply → expire ──
+        bytes32 nonce2 = keccak256("nonce-maxexp-app1");
+        vm.prank(applicant);
+        protocol.applyToListing{value: 0.05 ether}(
+            AD_HASH,
+            POLICY_ID,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce2,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+
+        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
+        bytes32 appId1 = keccak256(
+            abi.encodePacked(AD_HASH, applicant, nonce2)
+        );
+        vm.prank(anyone);
+        protocol.expireApplication(appId1);
+
+        // After 1st expiration: listing should still be ACTIVE
+        PPREVSingle.Listing memory listing1 = protocol.getListing(AD_HASH);
+        assertEq(
+            uint256(listing1.status),
+            uint256(PPREVSingle.ListingStatus.ACTIVE)
+        );
+
+        // ── Cycle 2: apply → expire (should auto-cancel) ──
+        bytes32 nonce3 = keccak256("nonce-maxexp-app2");
+        vm.prank(applicant);
+        protocol.applyToListing{value: 0.05 ether}(
+            AD_HASH,
+            POLICY_ID,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce3,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+
+        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
+        bytes32 appId2 = keccak256(
+            abi.encodePacked(AD_HASH, applicant, nonce3)
+        );
+
+        uint256 listerBalBefore = lister.balance;
+        vm.prank(anyone);
+        protocol.expireApplication(appId2);
+
+        // After 2nd expiration: listing should be CANCELLED
+        PPREVSingle.Listing memory listing2 = protocol.getListing(AD_HASH);
+        assertEq(
+            uint256(listing2.status),
+            uint256(PPREVSingle.ListingStatus.CANCELLED)
+        );
+        // Remaining collateral should be zero (returned to owner)
+        assertEq(listing2.collateral, 0);
+
+        // Lister should have received remaining collateral
+        uint256 listerBalAfter = lister.balance;
+        assertTrue(listerBalAfter > listerBalBefore);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Test: Revert on zero reqEscrow
+    // ════════════════════════════════════════════════════════════════════════
+
+    function test_RevertZeroReqEscrow() public {
+        bytes32 nonce = keccak256("nonce-zero-escrow");
+
+        vm.expectRevert(PPREVSingle.InvalidEscrowAmount.selector);
+        vm.prank(lister);
+        protocol.registerListing{value: 0.1 ether}(
+            AD_HASH,
+            POLICY_ID,
+            0, // zero reqEscrow
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
     }
 }

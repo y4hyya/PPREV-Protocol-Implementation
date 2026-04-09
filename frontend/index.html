@@ -891,7 +891,7 @@ const CONTRACT_ABI = [
   "function settleListing(bytes32,bytes32,uint256,bytes32,bytes,bytes32[],bytes)",
   "function expireApplication(bytes32)",
   "function cancelListing(bytes32)",
-  "function getListing(bytes32) view returns (tuple(address owner,bytes32 adHash,bytes32 policyId,uint256 reqEscrow,bytes32 transcriptCommitment,uint256 collateral,uint256 createdAt,uint8 status))",
+  "function getListing(bytes32) view returns (tuple(address owner,bytes32 adHash,bytes32 policyId,uint256 reqEscrow,bytes32 transcriptCommitment,uint256 collateral,uint256 createdAt,uint8 status,uint256 expirationCount))",
   "function getApplication(bytes32) view returns (tuple(bytes32 appId,bytes32 adHash,address applicant,bytes32 policyId,bytes32 transcriptCommitment,uint256 escrowAmount,uint256 createdAt,uint8 status))",
   "function isPolicyWhitelisted(bytes32) view returns (bool)",
   "function minCollateral() view returns (uint256)",

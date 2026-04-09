@@ -683,6 +683,100 @@ describe("PPREVSingle", function () {
     });
 
     // ════════════════════════════════════════════════════════════════════════
+    //  14. Max expirations auto-cancel
+    // ════════════════════════════════════════════════════════════════════════
+
+    describe("Max expirations", function () {
+        it("should auto-cancel listing after maxExpirations reached", async function () {
+            // Set maxExpirations to 2 for faster test
+            await protocol.connect(admin).setMaxExpirations(2);
+            await registerListing();
+
+            // ── Cycle 1: apply → expire ──
+            const { appId: appId1 } = await applyToListing();
+            await time.increase(EXPIRY_TIMEOUT + 1);
+            await protocol.connect(stranger).expireApplication(appId1);
+
+            // Still ACTIVE after 1st expiration
+            const listing1 = await protocol.getListing(AD_HASH);
+            expect(listing1.status).to.equal(ListingStatus.ACTIVE);
+            expect(listing1.expirationCount).to.equal(1);
+
+            // ── Cycle 2: apply → expire (should auto-cancel) ──
+            const { appId: appId2 } = await applyToListing();
+            await time.increase(EXPIRY_TIMEOUT + 1);
+
+            const landlordBefore = await ethers.provider.getBalance(landlord.address);
+
+            await expect(
+                protocol.connect(stranger).expireApplication(appId2),
+            ).to.emit(protocol, "ListingCancelled");
+
+            // CANCELLED after 2nd expiration
+            const listing2 = await protocol.getListing(AD_HASH);
+            expect(listing2.status).to.equal(4); // CANCELLED
+            expect(listing2.expirationCount).to.equal(2);
+            expect(listing2.collateral).to.equal(0n);
+
+            // Remaining collateral returned to landlord
+            const landlordAfter = await ethers.provider.getBalance(landlord.address);
+            expect(landlordAfter).to.be.greaterThan(landlordBefore);
+        });
+
+        it("should not auto-cancel before maxExpirations", async function () {
+            await protocol.connect(admin).setMaxExpirations(5);
+            await registerListing();
+
+            const { appId } = await applyToListing();
+            await time.increase(EXPIRY_TIMEOUT + 1);
+            await protocol.connect(stranger).expireApplication(appId);
+
+            const listing = await protocol.getListing(AD_HASH);
+            expect(listing.status).to.equal(ListingStatus.ACTIVE);
+            expect(listing.expirationCount).to.equal(1);
+        });
+
+        it("should reject new applications after auto-cancel", async function () {
+            await protocol.connect(admin).setMaxExpirations(1);
+            await registerListing();
+
+            const { appId } = await applyToListing();
+            await time.increase(EXPIRY_TIMEOUT + 1);
+            await protocol.connect(stranger).expireApplication(appId);
+
+            // Listing is now CANCELLED — new application should fail
+            const nonce = freshNonce();
+            const ts = await time.latest();
+            await expect(
+                protocol.connect(tenant).applyToListing(
+                    AD_HASH, POLICY_ID, TRANSCRIPT_TENANT,
+                    ts, nonce, DUMMY_PROOF, EMPTY_INPUTS, DUMMY_SIG,
+                    { value: REQ_ESCROW },
+                ),
+            ).to.be.revertedWithCustomError(protocol, "ListingNotActive");
+        });
+    });
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  15. Zero escrow prevention
+    // ════════════════════════════════════════════════════════════════════════
+
+    describe("Zero escrow prevention", function () {
+        it("should revert registerListing if reqEscrow is zero", async function () {
+            const nonce = freshNonce();
+            const ts = await time.latest();
+
+            await expect(
+                protocol.connect(landlord).registerListing(
+                    AD_HASH, POLICY_ID, 0, TRANSCRIPT_LANDLORD,
+                    ts, nonce, DUMMY_PROOF, EMPTY_INPUTS, DUMMY_SIG,
+                    { value: COLLATERAL },
+                ),
+            ).to.be.revertedWithCustomError(protocol, "InvalidEscrowAmount");
+        });
+    });
+
+    // ════════════════════════════════════════════════════════════════════════
     //  Bonus: Admin & policy tests
     // ════════════════════════════════════════════════════════════════════════
 

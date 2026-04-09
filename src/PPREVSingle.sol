@@ -145,6 +145,7 @@ contract PPREVSingle is ReentrancyGuard {
         uint256 collateral;
         uint256 createdAt;
         ListingStatus status;
+        uint256 expirationCount;
     }
 
     struct Application {
@@ -181,6 +182,7 @@ contract PPREVSingle is ReentrancyGuard {
     error PolicyNotWhitelisted(bytes32 policyId);
     error TransferFailed();
     error ListingAlreadyExists(bytes32 adHash);
+    error InvalidEscrowAmount();
 
     // ────────────────────────────────────────────────────────────────────────
     //  3d. Events
@@ -248,6 +250,9 @@ contract PPREVSingle is ReentrancyGuard {
 
     /// @notice Minimum collateral required for listing registration.
     uint256 public minCollateral;
+
+    /// @notice Maximum number of expirations before a listing is auto-cancelled.
+    uint256 public maxExpirations = 5;
 
     /// @dev adHash → Listing
     mapping(bytes32 => Listing) public listings;
@@ -333,6 +338,12 @@ contract PPREVSingle is ReentrancyGuard {
         emit ConfigUpdated("minCollateral", _minCollateral);
     }
 
+    /// @notice Update the maximum expiration count before auto-cancel.
+    function setMaxExpirations(uint256 _maxExpirations) external onlyOwner {
+        maxExpirations = _maxExpirations;
+        emit ConfigUpdated("maxExpirations", _maxExpirations);
+    }
+
     /// @notice Whitelist or un-whitelist a policy.
     function whitelistPolicy(
         bytes32 _policyId,
@@ -415,6 +426,9 @@ contract PPREVSingle is ReentrancyGuard {
         if (msg.value < minCollateral) {
             revert InsufficientCollateral(msg.value, minCollateral);
         }
+        if (_reqEscrow == 0) {
+            revert InvalidEscrowAmount();
+        }
 
         _consumeNonce(_nonce);
         _verifyFreshness(_timestamp);
@@ -442,7 +456,8 @@ contract PPREVSingle is ReentrancyGuard {
             transcriptCommitment: _transcriptCommitment,
             collateral: msg.value,
             createdAt: block.timestamp,
-            status: ListingStatus.ACTIVE
+            status: ListingStatus.ACTIVE,
+            expirationCount: 0
         });
 
         emit ListingRegistered(
@@ -649,11 +664,23 @@ contract PPREVSingle is ReentrancyGuard {
         uint256 slashAmount = listing.collateral / 10; // 10% of landlord collateral
 
         app.status = ApplicationStatus.EXPIRED;
-        listing.status = ListingStatus.ACTIVE;
         listing.collateral -= slashAmount;
+        listing.expirationCount++;
 
         // Clear active-application tracker
         activeApplications[app.adHash][app.applicant] = bytes32(0);
+
+        // Determine if listing should auto-cancel after too many expirations
+        bool autoCancelled = listing.expirationCount >= maxExpirations;
+        uint256 remainingCollateral = 0;
+
+        if (autoCancelled) {
+            listing.status = ListingStatus.CANCELLED;
+            remainingCollateral = listing.collateral;
+            listing.collateral = 0;
+        } else {
+            listing.status = ListingStatus.ACTIVE;
+        }
 
         // --- Interactions ---
         // Return escrow + slash penalty to applicant
@@ -669,6 +696,21 @@ contract PPREVSingle is ReentrancyGuard {
             escrowToReturn,
             slashAmount
         );
+
+        // If auto-cancelled, return remaining collateral to listing owner
+        if (autoCancelled) {
+            if (remainingCollateral > 0) {
+                (bool s2, ) = payable(listing.owner).call{
+                    value: remainingCollateral
+                }("");
+                if (!s2) revert TransferFailed();
+            }
+            emit ListingCancelled(
+                app.adHash,
+                listing.owner,
+                remainingCollateral
+            );
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════
