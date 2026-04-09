@@ -184,6 +184,7 @@ contract PPREVSingle is ReentrancyGuard {
     error ListingAlreadyExists(bytes32 adHash);
     error InvalidEscrowAmount();
     error InvalidVerifierAddress();
+    error ApplicationExpiredCannotSettle(bytes32 appId);
 
     // ────────────────────────────────────────────────────────────────────────
     //  3d. Events
@@ -601,7 +602,7 @@ contract PPREVSingle is ReentrancyGuard {
 
         // Verify not expired
         if (block.timestamp > app.createdAt + expiryTimeout) {
-            revert ApplicationNotPending(_appId); // effectively expired
+            revert ApplicationExpiredCannotSettle(_appId);
         }
 
         bytes32 sigMessage = keccak256(

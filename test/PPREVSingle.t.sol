@@ -409,6 +409,66 @@ contract PPREVSingleTest is Test {
     }
 
     // ════════════════════════════════════════════════════════════════════════
+    //  Test: Revert — Settle after expiry uses dedicated error
+    // ════════════════════════════════════════════════════════════════════════
+
+    function test_RevertSettleAfterExpiry() public {
+        bytes32 nonce1 = keccak256("nonce-reg-expire-settle");
+        bytes32 nonce2 = keccak256("nonce-app-expire-settle");
+        bytes32 nonce3 = keccak256("nonce-settle-expire-settle");
+
+        vm.prank(lister);
+        protocol.registerListing{value: 0.1 ether}(
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+
+        vm.prank(applicant);
+        protocol.applyToListing{value: 0.05 ether}(
+            AD_HASH,
+            POLICY_ID,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce2,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+
+        bytes32 appId = keccak256(
+            abi.encodePacked(AD_HASH, applicant, nonce2)
+        );
+
+        // Warp past expiry
+        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
+
+        // Settle should revert with ApplicationExpiredCannotSettle, not ApplicationNotPending
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PPREVSingle.ApplicationExpiredCannotSettle.selector,
+                appId
+            )
+        );
+        vm.prank(lister);
+        protocol.settleListing(
+            appId,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce3,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     //  Test: Admin functions
     // ════════════════════════════════════════════════════════════════════════
 

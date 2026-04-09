@@ -22,4 +22,5 @@ docs/
 
 # Misc
 .DS_Store
+.claude/
 ISSUES.md

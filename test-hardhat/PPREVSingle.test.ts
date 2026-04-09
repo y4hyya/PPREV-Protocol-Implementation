@@ -436,7 +436,7 @@ describe("PPREVSingle", function () {
                     appId, TRANSCRIPT_SETTLE, ts, nonce,
                     DUMMY_PROOF, EMPTY_INPUTS, DUMMY_SIG,
                 ),
-            ).to.be.revertedWithCustomError(protocol, "ApplicationNotPending");
+            ).to.be.revertedWithCustomError(protocol, "ApplicationExpiredCannotSettle");
         });
     });
 
