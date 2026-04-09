@@ -223,9 +223,10 @@ contract PPREVSingleTest is Test {
             uint256(PPREVSingle.ListingStatus.ACTIVE)
         );
 
-        // Applicant should have received escrow back
+        // Applicant should have received escrow + 10% slash of collateral
+        uint256 slashAmount = 0.01 ether; // 10% of 0.1 ether
         uint256 applicantBalAfter = applicant.balance;
-        assertEq(applicantBalAfter - applicantBalBefore, 0.05 ether);
+        assertEq(applicantBalAfter - applicantBalBefore, 0.05 ether + slashAmount);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -405,6 +406,161 @@ contract PPREVSingleTest is Test {
             _emptyInputs(),
             DUMMY_SIG
         );
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Test: Admin functions
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Test: Cancel Listing
+    // ════════════════════════════════════════════════════════════════════════
+
+    function test_CancelListing() public {
+        bytes32 nonce = keccak256("nonce-cancel");
+
+        vm.prank(lister);
+        protocol.registerListing{value: 0.1 ether}(
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+
+        uint256 listerBalBefore = lister.balance;
+
+        vm.prank(lister);
+        protocol.cancelListing(AD_HASH);
+
+        PPREVSingle.Listing memory listing = protocol.getListing(AD_HASH);
+        assertEq(
+            uint256(listing.status),
+            uint256(PPREVSingle.ListingStatus.CANCELLED)
+        );
+
+        // Collateral should be returned
+        uint256 listerBalAfter = lister.balance;
+        assertEq(listerBalAfter - listerBalBefore, 0.1 ether);
+    }
+
+    function test_RevertCancelNotOwner() public {
+        bytes32 nonce = keccak256("nonce-cancel-notown");
+
+        vm.prank(lister);
+        protocol.registerListing{value: 0.1 ether}(
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PPREVSingle.CallerNotListingOwner.selector,
+                anyone,
+                lister
+            )
+        );
+        vm.prank(anyone);
+        protocol.cancelListing(AD_HASH);
+    }
+
+    function test_RevertCancelLockedListing() public {
+        bytes32 nonce1 = keccak256("nonce-cancel-locked1");
+        bytes32 nonce2 = keccak256("nonce-cancel-locked2");
+
+        vm.prank(lister);
+        protocol.registerListing{value: 0.1 ether}(
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+
+        vm.prank(applicant);
+        protocol.applyToListing{value: 0.05 ether}(
+            AD_HASH,
+            POLICY_ID,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce2,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PPREVSingle.ListingNotActive.selector,
+                AD_HASH
+            )
+        );
+        vm.prank(lister);
+        protocol.cancelListing(AD_HASH);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Test: Slashing reduces collateral
+    // ════════════════════════════════════════════════════════════════════════
+
+    function test_SlashReducesCollateral() public {
+        bytes32 nonce1 = keccak256("nonce-reg-slash");
+        bytes32 nonce2 = keccak256("nonce-app-slash");
+
+        // Register
+        vm.prank(lister);
+        protocol.registerListing{value: 0.1 ether}(
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+
+        // Apply
+        vm.prank(applicant);
+        protocol.applyToListing{value: 0.05 ether}(
+            AD_HASH,
+            POLICY_ID,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce2,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+
+        // Warp past expiry
+        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
+
+        bytes32 appId = keccak256(
+            abi.encodePacked(AD_HASH, applicant, nonce2)
+        );
+        vm.prank(anyone);
+        protocol.expireApplication(appId);
+
+        // Collateral should be reduced by 10%
+        PPREVSingle.Listing memory listing = protocol.getListing(AD_HASH);
+        assertEq(listing.collateral, 0.09 ether); // 0.1 - 0.01
     }
 
     // ════════════════════════════════════════════════════════════════════════

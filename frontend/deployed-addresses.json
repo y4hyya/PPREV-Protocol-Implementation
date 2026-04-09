@@ -1,0 +1,11 @@
+{
+  "pprevSingle": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+  "zkVerifier": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+  "sigVerifier": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+  "notaryAddress": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720",
+  "policies": {
+    "rental-policy-v1": "0xd1c8fda2b3064c032c782a87ee25ace33024221f49e57f1731d74e6da0194e9e",
+    "OWN_RENT_V1": "0xe80f2d16955d789d1c1b8e068ca0599ba938ea74ceeabff2e17d5a2f18f59b31",
+    "OWN_SALE_V1": "0xa552f686db11ef6f174e4646f7f6d7dd5149aa82af360e1f342910a69f7d3e20"
+  }
+}

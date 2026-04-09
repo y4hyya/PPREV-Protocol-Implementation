@@ -469,13 +469,14 @@ describe("PPREVSingle", function () {
             expect(app.status).to.equal(AppStatus.EXPIRED);
         });
 
-        it("should emit ApplicationExpired event", async function () {
+        it("should emit ApplicationExpired event with slash amount", async function () {
             await time.increase(EXPIRY_TIMEOUT + 1);
+            const SLASH = COLLATERAL / 10n;
 
             await expect(
                 protocol.connect(stranger).expireApplication(appId),
             ).to.emit(protocol, "ApplicationExpired")
-                .withArgs(appId, AD_HASH, tenant.address, REQ_ESCROW);
+                .withArgs(appId, AD_HASH, tenant.address, REQ_ESCROW, SLASH);
         });
 
         it("should allow anyone to call expireApplication", async function () {
@@ -522,7 +523,7 @@ describe("PPREVSingle", function () {
             expect(contractAfter).to.equal(0n);
         });
 
-        it("should return escrow to tenant on expiration", async function () {
+        it("should return escrow + 10% slash to tenant on expiration", async function () {
             await registerListing();
             const { appId } = await applyToListing();
 
@@ -536,10 +537,11 @@ describe("PPREVSingle", function () {
             const tenantAfter = await ethers.provider.getBalance(tenant.address);
             const contractAfter = await ethers.provider.getBalance(await protocol.getAddress());
 
-            // Tenant gets escrow back (no gas cost since stranger called)
-            expect(tenantAfter - tenantBefore).to.equal(REQ_ESCROW);
-            // Contract still holds landlord's collateral
-            expect(contractAfter).to.equal(COLLATERAL);
+            const SLASH = COLLATERAL / 10n;
+            // Tenant gets escrow + 10% slash (no gas cost since stranger called)
+            expect(tenantAfter - tenantBefore).to.equal(REQ_ESCROW + SLASH);
+            // Contract holds landlord's remaining collateral (90%)
+            expect(contractAfter).to.equal(COLLATERAL - SLASH);
         });
 
         it("should revert registerListing if collateral is insufficient", async function () {
@@ -603,6 +605,80 @@ describe("PPREVSingle", function () {
                     { value: REQ_ESCROW },
                 ),
             ).to.not.be.reverted;
+        });
+    });
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Bonus: Admin & policy tests
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  12. Cancel listing
+    // ════════════════════════════════════════════════════════════════════════
+
+    describe("cancelListing", function () {
+        it("should cancel an ACTIVE listing and return collateral", async function () {
+            await registerListing();
+
+            const protocolAddr = await protocol.getAddress();
+            const landlordBefore = await ethers.provider.getBalance(landlord.address);
+
+            const tx = await protocol.connect(landlord).cancelListing(AD_HASH);
+            const receipt = await tx.wait();
+            const gasUsed = receipt!.gasUsed * receipt!.gasPrice;
+
+            const listing = await protocol.getListing(AD_HASH);
+            expect(listing.status).to.equal(4); // CANCELLED
+
+            const landlordAfter = await ethers.provider.getBalance(landlord.address);
+            expect(landlordAfter - landlordBefore + gasUsed).to.equal(COLLATERAL);
+
+            const contractAfter = await ethers.provider.getBalance(protocolAddr);
+            expect(contractAfter).to.equal(0n);
+        });
+
+        it("should emit ListingCancelled event", async function () {
+            await registerListing();
+
+            await expect(
+                protocol.connect(landlord).cancelListing(AD_HASH),
+            ).to.emit(protocol, "ListingCancelled")
+                .withArgs(AD_HASH, landlord.address, COLLATERAL);
+        });
+
+        it("should revert if listing is not ACTIVE (LOCKED)", async function () {
+            await registerListing();
+            await applyToListing();
+
+            await expect(
+                protocol.connect(landlord).cancelListing(AD_HASH),
+            ).to.be.revertedWithCustomError(protocol, "ListingNotActive");
+        });
+
+        it("should revert if caller is not the listing owner", async function () {
+            await registerListing();
+
+            await expect(
+                protocol.connect(stranger).cancelListing(AD_HASH),
+            ).to.be.revertedWithCustomError(protocol, "CallerNotListingOwner");
+        });
+    });
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  13. Slashing mechanics
+    // ════════════════════════════════════════════════════════════════════════
+
+    describe("Slashing on expiration", function () {
+        it("should reduce listing collateral by 10% after expiration", async function () {
+            await registerListing();
+            const { appId } = await applyToListing();
+
+            await time.increase(EXPIRY_TIMEOUT + 1);
+            await protocol.connect(stranger).expireApplication(appId);
+
+            const listing = await protocol.getListing(AD_HASH);
+            const SLASH = COLLATERAL / 10n;
+            expect(listing.collateral).to.equal(COLLATERAL - SLASH);
         });
     });
 

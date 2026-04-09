@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(npx hardhat:*)",
+      "Bash(npm install:*)",
+      "Bash(npm ls:*)",
+      "Bash(forge test:*)"
+    ]
+  }
+}

@@ -3,9 +3,10 @@
  *  PPREV Protocol — Full-Flow Simulation Script
  * ═══════════════════════════════════════════════════════════════════════════
  *
- *  This script runs the complete protocol lifecycle on Hardhat's built-in chain:
+ *  This script runs the complete protocol lifecycle on Hardhat's built-in chain
+ *  with REAL ECDSA signature verification (ECDSANotaryVerifier).
  *
- *    Step 1 — Deploy MockThresholdSignatureVerifier
+ *    Step 1 — Deploy ECDSANotaryVerifier (real ECDSA verification)
  *    Step 2 — Deploy MockZKVerifier
  *    Step 3 — Deploy PPREVSingle
  *    Step 4 — Whitelist a sample policyId
@@ -17,7 +18,14 @@
  */
 
 import { ethers } from "hardhat";
-import { Contract } from "ethers";
+import { Contract, Wallet } from "ethers";
+
+// ────────────────────────────────────────────────────────────────────────────
+//  Notary wallet — Anvil/Hardhat account #9
+// ────────────────────────────────────────────────────────────────────────────
+
+const NOTARY_PRIVATE_KEY =
+    "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6";
 
 // ────────────────────────────────────────────────────────────────────────────
 //  Console helpers
@@ -59,12 +67,21 @@ async function getBalance(address: string): Promise<string> {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-//  Dummy proof & signature constants  (mock verifiers always accept)
+//  Signature helper — signs with the notary wallet (EIP-191)
+// ────────────────────────────────────────────────────────────────────────────
+
+const notaryWallet = new Wallet(NOTARY_PRIVATE_KEY);
+
+async function signNotary(msgHash: string): Promise<string> {
+    return await notaryWallet.signMessage(ethers.getBytes(msgHash));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+//  Dummy ZK proof constants (mock verifier always accepts)
 // ────────────────────────────────────────────────────────────────────────────
 
 const DUMMY_ZK_PROOF = "0xdead";
 const DUMMY_ZK_INPUTS: string[] = [];          // empty public inputs
-const DUMMY_THRESHOLD_SIG = "0xbeef";
 
 // ────────────────────────────────────────────────────────────────────────────
 //  Main simulation
@@ -74,22 +91,24 @@ async function main() {
     // ── Signers ──
     const [admin, landlord, tenant] = await ethers.getSigners();
 
-    banner("PPREV Protocol — Full-Flow Simulation");
+    banner("PPREV Protocol — Full-Flow Simulation (Real ECDSA)");
     log("Admin (deployer)", admin.address);
     log("Landlord", landlord.address);
     log("Tenant", tenant.address);
+    log("Notary", notaryWallet.address);
 
     // ════════════════════════════════════════════════════════════════════════
-    //  Step 1 — Deploy MockThresholdSignatureVerifier
+    //  Step 1 — Deploy ECDSANotaryVerifier
     // ════════════════════════════════════════════════════════════════════════
 
-    banner("Step 1 — Deploy MockThresholdSignatureVerifier");
+    banner("Step 1 — Deploy ECDSANotaryVerifier");
 
-    const SigFactory = await ethers.getContractFactory("MockThresholdSignatureVerifier");
-    const sigVerifier = await SigFactory.deploy();
+    const SigFactory = await ethers.getContractFactory("ECDSANotaryVerifier");
+    const sigVerifier = await SigFactory.deploy(notaryWallet.address);
     await sigVerifier.waitForDeployment();
     const sigAddr = await sigVerifier.getAddress();
     log("Deployed at", sigAddr);
+    log("Notary address", notaryWallet.address);
 
     // ════════════════════════════════════════════════════════════════════════
     //  Step 2 — Deploy MockZKVerifier
@@ -154,6 +173,14 @@ async function main() {
     const timestampListing = block1!.timestamp;
     const collateral = ethers.parseEther("0.1");
 
+    // ── Compute real notary signature ──
+    const sigMessageListing = ethers.solidityPackedKeccak256(
+        ["bytes32", "bytes32", "bytes32", "uint256", "bytes32"],
+        [adHash, policyId, transcriptListing, timestampListing, nonceListing],
+    );
+    const thresholdSigListing = await signNotary(sigMessageListing);
+    log("Notary signature", thresholdSigListing.slice(0, 20) + "…");
+
     // ── Before ──
     section("Before registerListing");
     const listingBefore = await (protocol as any).getListing(adHash);
@@ -171,7 +198,7 @@ async function main() {
         nonceListing,
         DUMMY_ZK_PROOF,
         DUMMY_ZK_INPUTS,
-        DUMMY_THRESHOLD_SIG,
+        thresholdSigListing,
         { value: collateral },
     );
     await txReg.wait();
@@ -205,6 +232,14 @@ async function main() {
         ),
     );
 
+    // ── Compute real notary signature ──
+    const sigMessageApply = ethers.solidityPackedKeccak256(
+        ["bytes32", "bytes32", "bytes32", "uint256", "bytes32"],
+        [adHash, policyId, transcriptTenant, timestampApply, nonceApply],
+    );
+    const thresholdSigApply = await signNotary(sigMessageApply);
+    log("Notary signature", thresholdSigApply.slice(0, 20) + "…");
+
     // ── Before ──
     section("Before applyToListing");
     const listingBeforeApply = await (protocol as any).getListing(adHash);
@@ -221,7 +256,7 @@ async function main() {
         nonceApply,
         DUMMY_ZK_PROOF,
         DUMMY_ZK_INPUTS,
-        DUMMY_THRESHOLD_SIG,
+        thresholdSigApply,
         { value: reqEscrow },
     );
     const rcApply = await txApply.wait();
@@ -266,6 +301,14 @@ async function main() {
     const block3 = await ethers.provider.getBlock("latest");
     const timestampSettle = block3!.timestamp;
 
+    // ── Compute real notary signature ──
+    const sigMessageSettle = ethers.solidityPackedKeccak256(
+        ["bytes32", "bytes32", "uint256", "bytes32"],
+        [appId, transcriptSettle, timestampSettle, nonceSettle],
+    );
+    const thresholdSigSettle = await signNotary(sigMessageSettle);
+    log("Notary signature", thresholdSigSettle.slice(0, 20) + "…");
+
     // ── Before ──
     section("Before settleListing");
     const listingBeforeSettle = await (protocol as any).getListing(adHash);
@@ -283,7 +326,7 @@ async function main() {
         nonceSettle,
         DUMMY_ZK_PROOF,
         DUMMY_ZK_INPUTS,
-        DUMMY_THRESHOLD_SIG,
+        thresholdSigSettle,
     );
     await txSettle.wait();
 
@@ -305,6 +348,10 @@ async function main() {
     console.log();
     console.log("    Listing   : ACTIVE → LOCKED → SETTLED");
     console.log("    Application: (none) → PENDING_TRANSFER → SETTLED");
+    console.log();
+    console.log("    Verification pipeline:");
+    console.log("      • Real ECDSA signatures from Notary (ecrecover on-chain)");
+    console.log("      • Mock ZK proofs (always-pass stub)");
     console.log();
     console.log("    Funds flow:");
     console.log("      • Landlord deposited 0.1 ETH collateral");

@@ -886,9 +886,9 @@ const NOTARY_API       = 'http://localhost:3001';
 const HARDHAT_CHAIN_ID = 31337;
 
 const CONTRACT_ABI = [
-  "function registerListing(bytes32,bytes32,uint256,bytes32,uint256,bytes32,bytes) payable",
-  "function applyToListing(bytes32,bytes32,bytes32,uint256,bytes32,bytes) payable",
-  "function settleListing(bytes32,bytes32,uint256,bytes32,bytes)",
+  "function registerListing(bytes32,bytes32,uint256,bytes32,uint256,bytes32,bytes,bytes32[],bytes) payable",
+  "function applyToListing(bytes32,bytes32,bytes32,uint256,bytes32,bytes,bytes32[],bytes) payable",
+  "function settleListing(bytes32,bytes32,uint256,bytes32,bytes,bytes32[],bytes)",
   "function expireApplication(bytes32)",
   "function cancelListing(bytes32)",
   "function getListing(bytes32) view returns (tuple(address owner,bytes32 adHash,bytes32 policyId,uint256 reqEscrow,bytes32 transcriptCommitment,uint256 collateral,uint256 createdAt,uint8 status))",
@@ -1721,7 +1721,7 @@ async function realRegisterListing(f){
   toast('Requesting notary attestation…');
   const attest = await notaryPost('/notary/attest-listing',{landlordAddress:STATE.wallet.address,adHash,policyId,transcriptCommitment,timestamp,nonce});
   toast('Submitting transaction…');
-  const tx = await STATE.contract.registerListing(adHash,policyId,reqEscrow,transcriptCommitment,timestamp,nonce,attest.signature,{value:collateral});
+  const tx = await STATE.contract.registerListing(adHash,policyId,reqEscrow,transcriptCommitment,timestamp,nonce,"0x",[],attest.signature,{value:collateral});
   toast('Tx: '+tx.hash.slice(0,14)+'…');
   await tx.wait();
   localStorage.setItem('pprev_listing_'+adHash,JSON.stringify({type:f.type,address:f.address,price:f.price,desc:f.desc,policies:f.policies||[]}));
@@ -1734,7 +1734,7 @@ async function realApplyToListing(listing){
   toast('Requesting eligibility attestation…');
   const attest = await notaryPost('/notary/attest-application',{tenantAddress:STATE.wallet.address,adHash:listing.adHash,policyId:listing.policyId,transcriptCommitment,timestamp,nonce,reqEscrowEth:listing.reqEscrow});
   toast('Submitting transaction…');
-  const tx = await STATE.contract.applyToListing(listing.adHash,listing.policyId,transcriptCommitment,timestamp,nonce,attest.signature,{value:ethers.parseEther(String(listing.reqEscrow||0.05))});
+  const tx = await STATE.contract.applyToListing(listing.adHash,listing.policyId,transcriptCommitment,timestamp,nonce,"0x",[],attest.signature,{value:ethers.parseEther(String(listing.reqEscrow||0.05))});
   toast('Tx: '+tx.hash.slice(0,14)+'…');
   await tx.wait(); return true;
 }
@@ -1745,7 +1745,7 @@ async function realSettleListing(appId, adHash){
   toast('Requesting settlement attestation…');
   const attest = await notaryPost('/notary/attest-settlement',{landlordAddress:STATE.wallet.address,appId,transcriptCommitment,timestamp,nonce});
   toast('Submitting settlement…');
-  const tx = await STATE.contract.settleListing(appId,transcriptCommitment,timestamp,nonce,attest.signature);
+  const tx = await STATE.contract.settleListing(appId,transcriptCommitment,timestamp,nonce,"0x",[],attest.signature);
   toast('Tx: '+tx.hash.slice(0,14)+'…');
   await tx.wait(); toast('Settled ✓ Funds released'); return true;
 }

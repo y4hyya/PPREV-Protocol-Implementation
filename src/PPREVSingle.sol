@@ -21,6 +21,10 @@ pragma solidity ^0.8.24;
 import {
     ReentrancyGuard
 } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {
+    MessageHashUtils
+} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 // ============================================================================
 //  SECTION 1: Verifier Interfaces
@@ -71,6 +75,33 @@ contract MockThresholdSignatureVerifier is IThresholdSigVerifier {
         bytes calldata /* signature */
     ) external pure override returns (bool) {
         return true;
+    }
+}
+
+/// @title ECDSANotaryVerifier
+/// @notice Verifies EIP-191 ECDSA signatures from a known notary address.
+///         Production replacement for MockThresholdSignatureVerifier.
+contract ECDSANotaryVerifier is IThresholdSigVerifier {
+    address public immutable notaryAddress;
+
+    error InvalidNotaryAddress();
+
+    constructor(address _notaryAddress) {
+        if (_notaryAddress == address(0)) revert InvalidNotaryAddress();
+        notaryAddress = _notaryAddress;
+    }
+
+    /// @notice Verify that `signature` over `message` was produced by the notary.
+    /// @dev Applies EIP-191 prefix before ecrecover, matching ethers.js signMessage().
+    function verifySignature(
+        bytes32 message,
+        bytes calldata signature
+    ) external view override returns (bool) {
+        bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(
+            message
+        );
+        address recovered = ECDSA.recover(ethSignedHash, signature);
+        return recovered == notaryAddress;
     }
 }
 
@@ -182,7 +213,14 @@ contract PPREVSingle is ReentrancyGuard {
         bytes32 indexed appId,
         bytes32 indexed adHash,
         address indexed applicant,
-        uint256 escrowReturned
+        uint256 escrowReturned,
+        uint256 slashAmount
+    );
+
+    event ListingCancelled(
+        bytes32 indexed adHash,
+        address indexed owner,
+        uint256 collateralReturned
     );
 
     event VerifierUpdated(string verifierType, address newAddress);
@@ -608,25 +646,59 @@ contract PPREVSingle is ReentrancyGuard {
 
         // --- Effects ---
         uint256 escrowToReturn = app.escrowAmount;
+        uint256 slashAmount = listing.collateral / 10; // 10% of landlord collateral
 
         app.status = ApplicationStatus.EXPIRED;
         listing.status = ListingStatus.ACTIVE;
+        listing.collateral -= slashAmount;
 
         // Clear active-application tracker
         activeApplications[app.adHash][app.applicant] = bytes32(0);
 
         // --- Interactions ---
-        (bool success, ) = payable(app.applicant).call{value: escrowToReturn}(
-            ""
-        );
+        // Return escrow + slash penalty to applicant
+        (bool success, ) = payable(app.applicant).call{
+            value: escrowToReturn + slashAmount
+        }("");
         if (!success) revert TransferFailed();
 
         emit ApplicationExpired(
             _appId,
             app.adHash,
             app.applicant,
-            escrowToReturn
+            escrowToReturn,
+            slashAmount
         );
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  SECTION 9b: Listing Cancellation
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// @notice Cancel an active listing and return collateral to the owner.
+    /// @dev Only the listing owner may cancel, and only while the listing is ACTIVE.
+    /// @param _adHash The listing to cancel.
+    function cancelListing(bytes32 _adHash) external nonReentrant {
+        Listing storage listing = listings[_adHash];
+
+        if (listing.status != ListingStatus.ACTIVE) {
+            revert ListingNotActive(_adHash);
+        }
+        if (msg.sender != listing.owner) {
+            revert CallerNotListingOwner(msg.sender, listing.owner);
+        }
+
+        // --- Effects ---
+        uint256 collateralToReturn = listing.collateral;
+        listing.status = ListingStatus.CANCELLED;
+
+        // --- Interactions ---
+        (bool success, ) = payable(listing.owner).call{
+            value: collateralToReturn
+        }("");
+        if (!success) revert TransferFailed();
+
+        emit ListingCancelled(_adHash, listing.owner, collateralToReturn);
     }
 
     // ════════════════════════════════════════════════════════════════════════
