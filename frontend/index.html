@@ -552,7 +552,7 @@
               <div class="form-row"><label class="form-label">Price (ETH)</label><input type="number" id="inp-price" placeholder="0.5" step="0.01"></div>
               <div class="form-col2 form-row"><label class="form-label">Description</label><textarea id="inp-desc" placeholder="Describe the property…"></textarea></div>
               <div class="form-row"><label class="form-label">Collateral Bond (ETH)</label><input type="number" id="inp-bond" placeholder="0.1" step="0.01" min="0.1"></div>
-              <div class="form-row"><label class="form-label">Escrow Timeout (days)</label><input type="number" id="inp-timeout" placeholder="30"></div>
+              <div class="form-row"><label class="form-label">Required Escrow (ETH)</label><input type="number" id="inp-escrow" placeholder="0.15" step="0.01" min="0.01"></div>
               <div class="form-col2 form-row">
                 <span class="form-label">Required Proofs (Policy)</span>
                 <div class="check-group">
@@ -926,6 +926,7 @@ function validateCreateStep1(){
   if(!document.getElementById('inp-address').value.trim()){ toast('Property address is required','wrn'); return; }
   if(!parseFloat(document.getElementById('inp-price').value||0)){ toast('Price (ETH) is required','wrn'); return; }
   if(parseFloat(document.getElementById('inp-bond').value||0) < 0.1){ toast('Minimum collateral bond is 0.1 ETH','wrn'); return; }
+  if(!parseFloat(document.getElementById('inp-escrow').value||0)){ toast('Required escrow amount is required','wrn'); return; }
   createStep(2);
 }
 
@@ -1506,17 +1507,18 @@ function runVerifyOwn(){
   const result = document.getElementById('submit-result');
   const btn    = document.getElementById('submit-done-btn');
   items.forEach(i=>i.classList.remove('vis')); result.classList.add('hidden'); btn.classList.add('hidden');
-  const addrVal  = document.getElementById('inp-address')?.value||'Istanbul';
-  const typeVal  = document.querySelector('input[name="list-type"]:checked')?.value||'rent';
-  const priceVal = parseFloat(document.getElementById('inp-price')?.value||'0.5');
-  const descVal  = document.getElementById('inp-desc')?.value||'';
-  const bondVal  = parseFloat(document.getElementById('inp-bond')?.value||'0.1');
+  const addrVal   = document.getElementById('inp-address')?.value||'Istanbul';
+  const typeVal   = document.querySelector('input[name="list-type"]:checked')?.value||'rent';
+  const priceVal  = parseFloat(document.getElementById('inp-price')?.value||'0.5');
+  const descVal   = document.getElementById('inp-desc')?.value||'';
+  const bondVal   = parseFloat(document.getElementById('inp-bond')?.value||'0.1');
+  const escrowVal = parseFloat(document.getElementById('inp-escrow')?.value||'0.05');
   items.forEach(item=>{ setTimeout(()=>item.classList.add('vis'), parseInt(item.dataset.delay)) });
   setTimeout(async ()=>{
     result.classList.remove('hidden');
     if(!STATE.demoMode && STATE.wallet.connected && STATE.contract){
       try {
-        const adHash = await realRegisterListing({address:addrVal,type:typeVal,price:priceVal,desc:descVal,bond:bondVal,policies:[]});
+        const adHash = await realRegisterListing({address:addrVal,type:typeVal,price:priceVal,desc:descVal,bond:bondVal,escrow:escrowVal,policies:[]});
         document.getElementById('result-adhash').textContent = adHash.slice(0,22)+'…';
         btn.classList.remove('hidden'); toast('Listing registered on-chain ✓');
       } catch(err){ result.innerHTML=`<div style="color:var(--c-red)">Error: ${err.message}</div>`; btn.classList.remove('hidden'); toast('Failed: '+err.message,'err'); }
@@ -1534,7 +1536,7 @@ async function finishCreate(){
       price:parseFloat(document.getElementById('inp-price')?.value||'0.5'),
       desc:document.getElementById('inp-desc')?.value||'', status:'ACTIVE',
       owner:STATE.wallet.address||'0x0', bond:0.1, policy:['ownership'], apps:0, policyId:'demo',
-      reqEscrow:parseFloat(document.getElementById('inp-price')?.value||'0.5')*3,
+      reqEscrow:parseFloat(document.getElementById('inp-escrow')?.value||'0.05'),
     });
   }
   switchTabById('ltab','ltab-mine');
@@ -1556,7 +1558,7 @@ function startApply(adHash){
         <div class="stat-card"><div class="s-lbl">Type</div><div class="s-val" style="font-size:1.1rem">${tbadge(l.type)}</div></div>
         <div class="stat-card"><div class="s-lbl">Price</div><div class="s-val">${l.price} ETH${l.type==='rent'?'/mo':''}</div></div>
         <div class="stat-card"><div class="s-lbl">Address</div><div class="s-val" style="font-size:.9rem">${l.address}</div></div>
-        <div class="stat-card"><div class="s-lbl">Required Escrow</div><div class="s-val">${l.reqEscrow||l.price*3} ETH</div></div>
+        <div class="stat-card"><div class="s-lbl">Required Escrow</div><div class="s-val">${l.reqEscrow} ETH</div></div>
       </div>
       <div style="padding:16px;border-radius:var(--radius-lg);background:var(--c-bg);border:1px solid var(--c-border)">
         <div style="font-family:var(--mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--c-txt3);margin-bottom:10px">Required Attestations</div>
@@ -1652,7 +1654,7 @@ async function finishApply(){
   else if(STATE.applyTarget){
     const l = STATE.listings.find(x=>x.adHash===STATE.applyTarget.adHash);
     if(l){ l.status='LOCKED'; l.apps++ }
-    STATE.applications.unshift({appId:rHash(),adHash:STATE.applyTarget.adHash,tenant:STATE.wallet.address,type:STATE.applyTarget.type,escrow:STATE.applyTarget.reqEscrow||STATE.applyTarget.price*3,status:'PENDING_TRANSFER',expiresAt:Date.now()+3600000,proof:true});
+    STATE.applications.unshift({appId:rHash(),adHash:STATE.applyTarget.adHash,tenant:STATE.wallet.address,type:STATE.applyTarget.type,escrow:STATE.applyTarget.reqEscrow,status:'PENDING_TRANSFER',expiresAt:Date.now()+3600000,proof:true});
   }
   cancelApply();
   switchTabById('ttab','ttab-myapps');
@@ -1716,7 +1718,7 @@ async function realRegisterListing(f){
   const transcriptCommitment = ethers.keccak256(ethers.toUtf8Bytes('ll-transcript-'+STATE.wallet.address+Date.now()));
   const timestamp = Math.floor(Date.now()/1000);
   const nonce = ethers.keccak256(ethers.toUtf8Bytes('nonce-reg-'+Date.now()+Math.random()));
-  const reqEscrow  = ethers.parseEther(String(f.price||0.5));
+  const reqEscrow  = ethers.parseEther(String(f.escrow||0.05));
   const collateral = ethers.parseEther(String(f.bond||0.1));
   toast('Requesting notary attestation…');
   const attest = await notaryPost('/notary/attest-listing',{landlordAddress:STATE.wallet.address,adHash,policyId,transcriptCommitment,timestamp,nonce});
