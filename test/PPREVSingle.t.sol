@@ -417,6 +417,42 @@ contract PPREVSingleTest is Test {
     }
 
     // ════════════════════════════════════════════════════════════════════════
+    //  Test: Revert — Cannot apply to own listing
+    // ════════════════════════════════════════════════════════════════════════
+
+    function test_RevertApplyToOwnListing() public {
+        bytes32 nonce1 = keccak256("nonce-reg-self");
+        bytes32 nonce2 = keccak256("nonce-app-self");
+
+        vm.prank(lister);
+        protocol.registerListing{value: 0.1 ether}(
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+
+        // Lister tries to apply to their own listing
+        vm.expectRevert(PPREVSingle.CannotApplyToOwnListing.selector);
+        vm.prank(lister);
+        protocol.applyToListing{value: 0.05 ether}(
+            AD_HASH,
+            POLICY_ID,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce2,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     //  Test: Revert — Settle after expiry uses dedicated error
     // ════════════════════════════════════════════════════════════════════════
 

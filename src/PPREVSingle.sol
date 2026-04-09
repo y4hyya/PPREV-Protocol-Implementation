@@ -185,6 +185,7 @@ contract PPREVSingle is ReentrancyGuard {
     error InvalidEscrowAmount();
     error InvalidVerifierAddress();
     error ApplicationExpiredCannotSettle(bytes32 appId);
+    error CannotApplyToOwnListing();
 
     // ────────────────────────────────────────────────────────────────────────
     //  3d. Events
@@ -504,6 +505,9 @@ contract PPREVSingle is ReentrancyGuard {
         // --- Checks ---
         if (listing.status != ListingStatus.ACTIVE) {
             revert ListingNotActive(_adHash);
+        }
+        if (msg.sender == listing.owner) {
+            revert CannotApplyToOwnListing();
         }
         if (listing.policyId != _policyId) {
             revert PolicyMismatch(listing.policyId, _policyId);

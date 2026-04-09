@@ -326,6 +326,19 @@ describe("PPREVSingle", function () {
                 ),
             ).to.be.revertedWithCustomError(protocol, "PolicyMismatch");
         });
+
+        it("should revert if landlord applies to their own listing", async function () {
+            const nonce = freshNonce();
+            const ts = await time.latest();
+
+            await expect(
+                protocol.connect(landlord).applyToListing(
+                    AD_HASH, POLICY_ID, TRANSCRIPT_TENANT,
+                    ts, nonce, DUMMY_PROOF, EMPTY_INPUTS, DUMMY_SIG,
+                    { value: REQ_ESCROW },
+                ),
+            ).to.be.revertedWithCustomError(protocol, "CannotApplyToOwnListing");
+        });
     });
 
     // ════════════════════════════════════════════════════════════════════════
