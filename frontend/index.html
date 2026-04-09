@@ -1720,6 +1720,7 @@ async function realRegisterListing(f){
   const collateral = ethers.parseEther(String(f.bond||0.1));
   toast('Requesting notary attestation…');
   const attest = await notaryPost('/notary/attest-listing',{landlordAddress:STATE.wallet.address,adHash,policyId,transcriptCommitment,timestamp,nonce});
+  if (!attest.signature) throw new Error('Notary did not return a signature');
   toast('Submitting transaction…');
   const tx = await STATE.contract.registerListing(adHash,policyId,reqEscrow,transcriptCommitment,timestamp,nonce,"0x",[],attest.signature,{value:collateral});
   toast('Tx: '+tx.hash.slice(0,14)+'…');
@@ -1733,6 +1734,7 @@ async function realApplyToListing(listing){
   const nonce = ethers.keccak256(ethers.toUtf8Bytes('nonce-app-'+Date.now()+Math.random()));
   toast('Requesting eligibility attestation…');
   const attest = await notaryPost('/notary/attest-application',{tenantAddress:STATE.wallet.address,adHash:listing.adHash,policyId:listing.policyId,transcriptCommitment,timestamp,nonce,reqEscrowEth:listing.reqEscrow});
+  if (!attest.signature) throw new Error('Notary did not return a signature');
   toast('Submitting transaction…');
   const tx = await STATE.contract.applyToListing(listing.adHash,listing.policyId,transcriptCommitment,timestamp,nonce,"0x",[],attest.signature,{value:ethers.parseEther(String(listing.reqEscrow||0.05))});
   toast('Tx: '+tx.hash.slice(0,14)+'…');
@@ -1744,6 +1746,7 @@ async function realSettleListing(appId, adHash){
   const nonce = ethers.keccak256(ethers.toUtf8Bytes('nonce-settle-'+Date.now()+Math.random()));
   toast('Requesting settlement attestation…');
   const attest = await notaryPost('/notary/attest-settlement',{landlordAddress:STATE.wallet.address,appId,transcriptCommitment,timestamp,nonce});
+  if (!attest.signature) throw new Error('Notary did not return a signature');
   toast('Submitting settlement…');
   const tx = await STATE.contract.settleListing(appId,transcriptCommitment,timestamp,nonce,"0x",[],attest.signature);
   toast('Tx: '+tx.hash.slice(0,14)+'…');

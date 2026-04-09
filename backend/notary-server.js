@@ -242,15 +242,17 @@ app.post('/notary/attest-application', async (req, res) => {
   const policyKey = Object.keys(db.whitelistedPolicies).find(k =>
     ethers.keccak256(ethers.toUtf8Bytes(k)) === policyId
   );
-  if (policyKey) {
-    const policy = db.whitelistedPolicies[policyKey];
-    if (policy.minTenantIncome && record.aylikGelir < policy.minTenantIncome)
-      return reject(res, 403,
-        `Monthly income ${record.aylikGelir} TRY is below the required ${policy.minTenantIncome} TRY for policy ${policyKey}.`);
-    if (policy.minCreditScore && record.krediSkoru < policy.minCreditScore)
-      return reject(res, 403,
-        `Credit score ${record.krediSkoru} is below the required ${policy.minCreditScore} for policy ${policyKey}.`);
-  }
+  if (!policyKey)
+    return reject(res, 400,
+      `Unknown policy: ${policyId}. Cannot verify eligibility — policy not found in E-Devlet registry.`);
+
+  const policy = db.whitelistedPolicies[policyKey];
+  if (policy.minTenantIncome && record.aylikGelir < policy.minTenantIncome)
+    return reject(res, 403,
+      `Monthly income ${record.aylikGelir} TRY is below the required ${policy.minTenantIncome} TRY for policy ${policyKey}.`);
+  if (policy.minCreditScore && record.krediSkoru < policy.minCreditScore)
+    return reject(res, 403,
+      `Credit score ${record.krediSkoru} is below the required ${policy.minCreditScore} for policy ${policyKey}.`);
 
   console.log(`  ✓ Tenant verified: ${record.ad} (income: ${record.aylikGelir} TRY/mo, credit: ${record.krediSkoru})`);
 
