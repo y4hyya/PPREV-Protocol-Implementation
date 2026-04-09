@@ -593,6 +593,13 @@ contract PPREVSingleTest is Test {
 
         protocol.whitelistPolicy(newPolicy, false);
         assertFalse(protocol.isPolicyWhitelisted(newPolicy));
+
+        // Zero-address verifiers should revert
+        vm.expectRevert(PPREVSingle.InvalidVerifierAddress.selector);
+        protocol.setZKVerifier(address(0));
+
+        vm.expectRevert(PPREVSingle.InvalidVerifierAddress.selector);
+        protocol.setThresholdVerifier(address(0));
     }
 
     // ════════════════════════════════════════════════════════════════════════

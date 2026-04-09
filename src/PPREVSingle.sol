@@ -183,6 +183,7 @@ contract PPREVSingle is ReentrancyGuard {
     error TransferFailed();
     error ListingAlreadyExists(bytes32 adHash);
     error InvalidEscrowAmount();
+    error InvalidVerifierAddress();
 
     // ────────────────────────────────────────────────────────────────────────
     //  3d. Events
@@ -294,6 +295,8 @@ contract PPREVSingle is ReentrancyGuard {
         uint256 _expiryTimeout,
         uint256 _minCollateral
     ) {
+        if (_zkVerifier == address(0)) revert InvalidVerifierAddress();
+        if (_thresholdVerifier == address(0)) revert InvalidVerifierAddress();
         owner = msg.sender;
         zkVerifier = IZKVerifier(_zkVerifier);
         thresholdVerifier = IThresholdSigVerifier(_thresholdVerifier);
@@ -308,6 +311,7 @@ contract PPREVSingle is ReentrancyGuard {
 
     /// @notice Update the ZK verifier contract address.
     function setZKVerifier(address _zkVerifier) external onlyOwner {
+        if (_zkVerifier == address(0)) revert InvalidVerifierAddress();
         zkVerifier = IZKVerifier(_zkVerifier);
         emit VerifierUpdated("ZKVerifier", _zkVerifier);
     }
@@ -316,6 +320,7 @@ contract PPREVSingle is ReentrancyGuard {
     function setThresholdVerifier(
         address _thresholdVerifier
     ) external onlyOwner {
+        if (_thresholdVerifier == address(0)) revert InvalidVerifierAddress();
         thresholdVerifier = IThresholdSigVerifier(_thresholdVerifier);
         emit VerifierUpdated("ThresholdVerifier", _thresholdVerifier);
     }

@@ -805,5 +805,17 @@ describe("PPREVSingle", function () {
                 protocol.connect(stranger).whitelistPolicy(hash("x"), true),
             ).to.be.revertedWithCustomError(protocol, "NotOwner");
         });
+
+        it("should revert setZKVerifier with zero address", async function () {
+            await expect(
+                protocol.connect(admin).setZKVerifier(ethers.ZeroAddress),
+            ).to.be.revertedWithCustomError(protocol, "InvalidVerifierAddress");
+        });
+
+        it("should revert setThresholdVerifier with zero address", async function () {
+            await expect(
+                protocol.connect(admin).setThresholdVerifier(ethers.ZeroAddress),
+            ).to.be.revertedWithCustomError(protocol, "InvalidVerifierAddress");
+        });
     });
 });
