@@ -8,7 +8,9 @@
       "Bash(forge test:*)",
       "Bash(node -e \"try { const p = require\\('./package-lock.json'\\); const deps = Object.keys\\(p.packages[''].dependencies || {}\\); const devDeps = Object.keys\\(p.packages[''].devDependencies || {}\\); console.log\\('DEPS:', deps.join\\(', '\\)\\); console.log\\('DEVDEPS:', devDeps.join\\(', '\\)\\); } catch\\(e\\) { console.log\\(e.message\\); }\")",
       "Bash(which forge:*)",
-      "Bash(forge build:*)"
+      "Bash(forge build:*)",
+      "Bash(cp \"/Users/yahya/Desktop/Projects/PPREV/Research Paper/Abstract_Flowchart.png\" \"/Users/yahya/Desktop/Projects/PPREV/PPREV Implementation/assets/\")",
+      "Bash(cp \"/Users/yahya/Desktop/Projects/PPREV/Research Paper/protocol_flow.png\" \"/Users/yahya/Desktop/Projects/PPREV/PPREV Implementation/assets/\")"
     ]
   }
 }

@@ -157,6 +157,10 @@ contract PPREVSingleTest is Test {
         // Lister should have received escrow (0.05) + collateral (0.1) = 0.15 ether
         uint256 listerBalAfter = lister.balance;
         assertEq(listerBalAfter - listerBalBefore, 0.15 ether);
+
+        // Struct fields should be zeroed after transfer
+        assertEq(listing.collateral, 0);
+        assertEq(app.escrowAmount, 0);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -227,6 +231,10 @@ contract PPREVSingleTest is Test {
         uint256 slashAmount = 0.01 ether; // 10% of 0.1 ether
         uint256 applicantBalAfter = applicant.balance;
         assertEq(applicantBalAfter - applicantBalBefore, 0.05 ether + slashAmount);
+
+        // Escrow field should be zeroed after transfer
+        PPREVSingle.Application memory app = protocol.getApplication(appId);
+        assertEq(app.escrowAmount, 0);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -506,6 +514,9 @@ contract PPREVSingleTest is Test {
         // Collateral should be returned
         uint256 listerBalAfter = lister.balance;
         assertEq(listerBalAfter - listerBalBefore, 0.1 ether);
+
+        // Collateral field should be zeroed
+        assertEq(listing.collateral, 0);
     }
 
     function test_RevertCancelNotOwner() public {

@@ -617,6 +617,8 @@ contract PPREVSingle is ReentrancyGuard {
 
         app.status = ApplicationStatus.SETTLED;
         listing.status = ListingStatus.SETTLED;
+        app.escrowAmount = 0;
+        listing.collateral = 0;
 
         // Clear active-application tracker
         activeApplications[app.adHash][app.applicant] = bytes32(0);
@@ -670,6 +672,7 @@ contract PPREVSingle is ReentrancyGuard {
         uint256 slashAmount = listing.collateral / 10; // 10% of landlord collateral
 
         app.status = ApplicationStatus.EXPIRED;
+        app.escrowAmount = 0;
         listing.collateral -= slashAmount;
         listing.expirationCount++;
 
@@ -739,6 +742,7 @@ contract PPREVSingle is ReentrancyGuard {
         // --- Effects ---
         uint256 collateralToReturn = listing.collateral;
         listing.status = ListingStatus.CANCELLED;
+        listing.collateral = 0;
 
         // --- Interactions ---
         (bool success, ) = payable(listing.owner).call{

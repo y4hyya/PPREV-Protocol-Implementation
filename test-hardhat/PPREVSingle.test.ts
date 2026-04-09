@@ -521,6 +521,12 @@ describe("PPREVSingle", function () {
             expect(landlordAfter - landlordBefore + gasUsed).to.equal(COLLATERAL + REQ_ESCROW);
             // Contract should be empty
             expect(contractAfter).to.equal(0n);
+
+            // Struct fields should be zeroed
+            const listing = await protocol.getListing(AD_HASH);
+            const app = await protocol.getApplication(appId);
+            expect(listing.collateral).to.equal(0n);
+            expect(app.escrowAmount).to.equal(0n);
         });
 
         it("should return escrow + 10% slash to tenant on expiration", async function () {
@@ -542,6 +548,10 @@ describe("PPREVSingle", function () {
             expect(tenantAfter - tenantBefore).to.equal(REQ_ESCROW + SLASH);
             // Contract holds landlord's remaining collateral (90%)
             expect(contractAfter).to.equal(COLLATERAL - SLASH);
+
+            // Escrow field should be zeroed
+            const app = await protocol.getApplication(appId);
+            expect(app.escrowAmount).to.equal(0n);
         });
 
         it("should revert registerListing if collateral is insufficient", async function () {
@@ -629,6 +639,7 @@ describe("PPREVSingle", function () {
 
             const listing = await protocol.getListing(AD_HASH);
             expect(listing.status).to.equal(4); // CANCELLED
+            expect(listing.collateral).to.equal(0n); // zeroed after transfer
 
             const landlordAfter = await ethers.provider.getBalance(landlord.address);
             expect(landlordAfter - landlordBefore + gasUsed).to.equal(COLLATERAL);

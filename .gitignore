@@ -20,6 +20,26 @@ docs/
 # Dotenv file
 .env
 
+# Secrets — NEVER commit
+server.key
+server.crt
+*.pem
+.env
+.env.*
+
+# ZK circuit build artifacts
+*.r1cs
+*.sym
+*.wasm
+*_0000.zkey
+*_final.zkey
+witness_calculator.js
+generate_witness.js
+verification_key.json
+
+# Compiled contract debug artifacts
+*.dbg.json
+
 # Misc
 .DS_Store
 .claude/
