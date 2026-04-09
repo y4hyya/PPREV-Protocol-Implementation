@@ -70,7 +70,15 @@ contract PPREVSingleTest is Test {
         // ── Phase 1: Register listing ──
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
 
         PPREVSingle.Listing memory listing = protocol.getListing(AD_HASH);
@@ -130,7 +138,15 @@ contract PPREVSingleTest is Test {
         // Register
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
 
         // Apply
@@ -180,7 +196,15 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
 
         // Second listing with same nonce should revert
@@ -188,7 +212,15 @@ contract PPREVSingleTest is Test {
         vm.expectRevert(abi.encodeWithSelector(PPREVSingle.NonceAlreadyUsed.selector, nonce));
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            adHash2, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            adHash2,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
     }
 
@@ -202,7 +234,15 @@ contract PPREVSingleTest is Test {
         vm.expectRevert(abi.encodeWithSelector(PPREVSingle.InsufficientCollateral.selector, 0.01 ether, MIN_COLLATERAL));
         vm.prank(lister);
         protocol.registerListing{value: 0.01 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
     }
 
@@ -220,7 +260,15 @@ contract PPREVSingleTest is Test {
         vm.expectRevert();
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, staleTimestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            staleTimestamp,
+            nonce,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
     }
 
@@ -235,7 +283,15 @@ contract PPREVSingleTest is Test {
         vm.expectRevert(abi.encodeWithSelector(PPREVSingle.PolicyNotWhitelisted.selector, badPolicy));
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, badPolicy, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            badPolicy,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
     }
 
@@ -251,7 +307,15 @@ contract PPREVSingleTest is Test {
         // Register
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
 
         // Apply
@@ -280,7 +344,15 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
 
         // Lister tries to apply to their own listing
@@ -302,7 +374,15 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
 
         vm.prank(applicant);
@@ -332,7 +412,15 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
 
         uint256 listerBalBefore = lister.balance;
@@ -356,7 +444,15 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
 
         vm.expectRevert(abi.encodeWithSelector(PPREVSingle.CallerNotListingOwner.selector, anyone, lister));
@@ -370,7 +466,15 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
 
         vm.prank(applicant);
@@ -394,7 +498,15 @@ contract PPREVSingleTest is Test {
         // Register
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
 
         // Apply
@@ -466,7 +578,15 @@ contract PPREVSingleTest is Test {
 
         vm.prank(lister);
         protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, block.timestamp, nonce1, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+            AD_HASH,
+            POLICY_ID,
+            REQ_ESCROW,
+            TRANSCRIPT_COMMIT,
+            block.timestamp,
+            nonce1,
+            DUMMY_PROOF,
+            _emptyInputs(),
+            DUMMY_SIG
         );
 
         // ── Cycle 1: apply → expire ──
