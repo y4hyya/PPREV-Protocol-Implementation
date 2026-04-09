@@ -16,6 +16,8 @@ RUN npm install --prefer-offline --no-audit --no-fund
 # Copy project files
 COPY hardhat.config.ts tsconfig.json ./
 COPY src/ ./src/
+COPY test/ ./test/
+COPY test-hardhat/ ./test-hardhat/
 COPY scripts/ ./scripts/
 
 # Compile contracts
