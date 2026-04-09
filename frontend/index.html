@@ -31,6 +31,12 @@
       <button id="rbtn-ll" onclick="switchRole('landlord')">Landlord</button>
       <button id="rbtn-tn" onclick="switchRole('tenant')">Tenant</button>
     </div>
+    <button id="edevlet-btn" class="hidden edevlet-nav-btn" onclick="openEdevletModal()">
+      🇹🇷 <span>E-Devlet Doğrula</span>
+    </button>
+    <div id="edevlet-verified-badge" class="hidden edevlet-verified-badge">
+      <span>🇹🇷</span><span id="edevlet-verified-name"></span>
+    </div>
     <div class="wallet-chip" onclick="toggleWallet()">
       <span class="wallet-dot" id="w-dot"></span>
       <span id="w-addr">Connect</span>
@@ -72,6 +78,108 @@
       <div class="modal-foot">
         <span class="modal-skip" onclick="closeModal()">Skip — I know what I'm doing</span>
         <button class="btn btn-primary" onclick="closeModal();navigate('dashboard')">Get Started →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ E-DEVLET KAYIT MODALI ══════════ -->
+  <div class="modal-bg hidden" id="edevlet-modal-bg">
+    <div class="modal" style="max-width:540px">
+      <div class="modal-head" style="padding-bottom:20px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+          <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c-indigo2),var(--c-violet));display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0">🇹🇷</div>
+          <div>
+            <h2 style="font-size:1.2rem;margin:0">E-Devlet Kimlik Doğrulama</h2>
+            <p style="font-size:.8rem;color:var(--c-txt3);margin:2px 0 0">Bu cüzdan E-Devlet'te kayıtlı değil</p>
+          </div>
+        </div>
+        <p style="font-size:.875rem;color:var(--c-txt2);line-height:1.6;padding:12px 16px;background:rgba(91,99,240,0.06);border:1px solid rgba(91,99,240,0.15);border-radius:10px">
+          PPREV protokolünü kullanmak için kimliğinizi E-Devlet simülasyonu üzerinden doğrulamanız gerekiyor. Kişisel verileriniz asla zincire yazılmaz.
+        </p>
+      </div>
+      <div class="modal-body" style="padding-top:0">
+        <form id="edevlet-form" onsubmit="submitEdevletRegistration(event)">
+
+          <!-- Role seçimi -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">
+            <label id="edev-role-ll" class="edev-role-card edev-role-card-selected" onclick="selectEdevRole('landlord')">
+              <input type="radio" name="edev_role" value="landlord" checked style="display:none">
+              <span style="font-size:1.5rem">🏠</span>
+              <span style="font-weight:700;font-size:.9rem">Ev Sahibi</span>
+              <span style="font-size:.75rem;color:var(--c-txt3)">Mülk Kayıt</span>
+            </label>
+            <label id="edev-role-tn" class="edev-role-card" onclick="selectEdevRole('tenant')">
+              <input type="radio" name="edev_role" value="tenant" style="display:none">
+              <span style="font-size:1.5rem">👤</span>
+              <span style="font-weight:700;font-size:.9rem">Kiracı / Alıcı</span>
+              <span style="font-size:.75rem;color:var(--c-txt3)">Gelir Doğrulama</span>
+            </label>
+          </div>
+
+          <!-- Ortak alanlar -->
+          <div class="form-grid" style="margin-bottom:16px">
+            <div class="form-group">
+              <label class="form-label">Ad Soyad</label>
+              <input type="text" id="edev-ad" placeholder="Ahmet Yılmaz" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">TC Kimlik No</label>
+              <input type="text" id="edev-tc" placeholder="12345678901" maxlength="11" pattern="\d{11}" required>
+            </div>
+          </div>
+
+          <!-- Ev Sahibi alanları -->
+          <div id="edev-landlord-fields">
+            <div style="font-size:.75rem;font-weight:800;font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;color:var(--c-indigo);margin-bottom:10px">Tapu Bilgileri</div>
+            <div class="form-grid" style="margin-bottom:12px">
+              <div class="form-group">
+                <label class="form-label">Tapu No</label>
+                <input type="text" id="edev-tapu" placeholder="IST-2024-001">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Mülk Tipi</label>
+                <select id="edev-tip">
+                  <option value="rent">Kiralık</option>
+                  <option value="sale">Satılık</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label class="form-label">Mülk Adresi</label>
+              <input type="text" id="edev-adres" placeholder="Kadıköy, İstanbul">
+            </div>
+            <div class="form-group" style="margin-bottom:16px">
+              <label class="form-label">Metrekare (m²)</label>
+              <input type="number" id="edev-m2" placeholder="85" min="10" max="5000">
+            </div>
+          </div>
+
+          <!-- Kiracı alanları -->
+          <div id="edev-tenant-fields" class="hidden">
+            <div style="font-size:.75rem;font-weight:800;font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;color:var(--c-indigo);margin-bottom:10px">SGK / Gelir Bilgileri</div>
+            <div class="form-grid" style="margin-bottom:12px">
+              <div class="form-group">
+                <label class="form-label">Aylık Net Gelir (TRY)</label>
+                <input type="number" id="edev-gelir" placeholder="25000" min="0">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Kredi Skoru (0–1900)</label>
+                <input type="number" id="edev-kredi" placeholder="750" min="0" max="1900">
+              </div>
+            </div>
+            <div style="font-size:.8rem;color:var(--c-txt3);padding:10px 14px;background:rgba(45,212,168,0.04);border:1px solid rgba(45,212,168,0.12);border-radius:8px;line-height:1.5">
+              Gelir ve kredi skoru bilgileriniz yalnızca uygunluk doğrulaması için kullanılır. Zincire yalnızca "yeterli / yetersiz" bilgisi yazılır.
+            </div>
+          </div>
+
+          <div id="edev-error" style="display:none;margin-top:12px;padding:10px 14px;background:var(--c-red2);border:1px solid rgba(239,107,107,0.25);border-radius:8px;font-size:.85rem;color:var(--c-red)"></div>
+        </form>
+      </div>
+      <div class="modal-foot">
+        <span class="modal-skip" onclick="closeEdevletModal()">Vazgeç</span>
+        <button class="btn btn-primary" onclick="submitEdevletRegistration(event)" id="edev-submit-btn">
+          <span id="edev-submit-txt">E-Devlet'e Kaydet →</span>
+        </button>
       </div>
     </div>
   </div>
@@ -986,9 +1094,115 @@ async function detectRole(address){
   try {
     const res  = await fetch(`${NOTARY_API}/notary/edevlet/${address}`);
     const data = await res.json();
-    if(data.role==='landlord') switchRole('landlord');
-    else if(data.role==='tenant') switchRole('tenant');
-  } catch(e){}
+    if(data.role==='landlord'){ switchRole('landlord'); showEdevletVerified(data.record?.ad); }
+    else if(data.role==='tenant'){ switchRole('tenant'); showEdevletVerified(data.record?.ad); }
+    else { showEdevletBtn(); openEdevletModal(); }
+  } catch(e){ showEdevletBtn(); }
+}
+function showEdevletBtn(){
+  document.getElementById('edevlet-btn').classList.remove('hidden');
+  document.getElementById('edevlet-verified-badge').classList.add('hidden');
+}
+function showEdevletVerified(name){
+  document.getElementById('edevlet-btn').classList.add('hidden');
+  const badge = document.getElementById('edevlet-verified-badge');
+  badge.classList.remove('hidden');
+  document.getElementById('edevlet-verified-name').textContent = name || 'Doğrulandı';
+}
+function hideEdevletIndicators(){
+  document.getElementById('edevlet-btn').classList.add('hidden');
+  document.getElementById('edevlet-verified-badge').classList.add('hidden');
+}
+
+/* ══════════════════════════════════
+   E-DEVLET KAYIT MODALI
+══════════════════════════════════ */
+function openEdevletModal(){
+  document.getElementById('edevlet-modal-bg').classList.remove('hidden');
+  document.body.style.overflow='hidden';
+  // reset form
+  document.getElementById('edev-ad').value='';
+  document.getElementById('edev-tc').value='';
+  document.getElementById('edev-tapu').value='';
+  document.getElementById('edev-adres').value='';
+  document.getElementById('edev-m2').value='';
+  document.getElementById('edev-gelir').value='';
+  document.getElementById('edev-kredi').value='';
+  document.getElementById('edev-error').style.display='none';
+  selectEdevRole('landlord');
+}
+function closeEdevletModal(){
+  document.getElementById('edevlet-modal-bg').classList.add('hidden');
+  document.body.style.overflow='';
+}
+function selectEdevRole(role){
+  const llCard = document.getElementById('edev-role-ll');
+  const tnCard = document.getElementById('edev-role-tn');
+  const llFields = document.getElementById('edev-landlord-fields');
+  const tnFields = document.getElementById('edev-tenant-fields');
+  if(role==='landlord'){
+    llCard.classList.add('edev-role-card-selected');
+    tnCard.classList.remove('edev-role-card-selected');
+    llFields.classList.remove('hidden');
+    tnFields.classList.add('hidden');
+    llCard.querySelector('input').checked=true;
+  } else {
+    tnCard.classList.add('edev-role-card-selected');
+    llCard.classList.remove('edev-role-card-selected');
+    tnFields.classList.remove('hidden');
+    llFields.classList.add('hidden');
+    tnCard.querySelector('input').checked=true;
+  }
+}
+async function submitEdevletRegistration(e){
+  if(e) e.preventDefault();
+  const errEl = document.getElementById('edev-error');
+  const btn   = document.getElementById('edev-submit-btn');
+  const txt   = document.getElementById('edev-submit-txt');
+  errEl.style.display='none';
+
+  const role = document.querySelector('input[name="edev_role"]:checked')?.value;
+  const ad   = document.getElementById('edev-ad').value.trim();
+  const tc   = document.getElementById('edev-tc').value.trim();
+
+  if(!ad || !tc){ errEl.textContent='Ad Soyad ve TC Kimlik No zorunludur.'; errEl.style.display='block'; return; }
+  if(!/^\d{11}$/.test(tc)){ errEl.textContent='TC Kimlik No 11 haneli rakam olmalıdır.'; errEl.style.display='block'; return; }
+
+  const address = STATE.wallet.address;
+  let payload = { address, role, ad, tcKimlik: tc };
+
+  if(role==='landlord'){
+    const tapuNo   = document.getElementById('edev-tapu').value.trim();
+    const adres    = document.getElementById('edev-adres').value.trim();
+    const tip      = document.getElementById('edev-tip').value;
+    const metrekare= Number(document.getElementById('edev-m2').value);
+    if(!tapuNo||!adres||!metrekare){ errEl.textContent='Tapu No, Adres ve Metrekare alanları zorunludur.'; errEl.style.display='block'; return; }
+    payload.properties = [{ tapuNo, adres, tip, metrekare }];
+  } else {
+    const aylikGelir = Number(document.getElementById('edev-gelir').value);
+    const krediSkoru = Number(document.getElementById('edev-kredi').value);
+    if(isNaN(aylikGelir)||aylikGelir<0){ errEl.textContent='Geçerli bir aylık gelir girin.'; errEl.style.display='block'; return; }
+    if(isNaN(krediSkoru)||krediSkoru<0||krediSkoru>1900){ errEl.textContent='Kredi skoru 0–1900 arasında olmalıdır.'; errEl.style.display='block'; return; }
+    payload.aylikGelir = aylikGelir;
+    payload.krediSkoru = krediSkoru;
+  }
+
+  // submit
+  btn.disabled=true; txt.textContent='Doğrulanıyor...';
+  try {
+    const resp = await fetch(`${NOTARY_API}/notary/edevlet/register`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+    });
+    const data = await resp.json();
+    if(!resp.ok){ errEl.textContent=data.error||'Kayıt başarısız.'; errEl.style.display='block'; btn.disabled=false; txt.textContent='E-Devlet\'e Kaydet →'; return; }
+    closeEdevletModal();
+    switchRole(data.role);
+    showEdevletVerified(ad);
+    toast(`E-Devlet doğrulandı: ${ad} (${data.role==='landlord'?'Ev Sahibi':'Kiracı'})`,'ok');
+  } catch(err){
+    errEl.textContent='Sunucuya bağlanılamadı. Notary çalışıyor mu?'; errEl.style.display='block';
+    btn.disabled=false; txt.textContent='E-Devlet\'e Kaydet →';
+  }
 }
 
 /* ── Demo seed ── */

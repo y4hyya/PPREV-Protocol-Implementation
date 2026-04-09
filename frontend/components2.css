@@ -352,3 +352,47 @@ tr:hover td { background:rgba(255,255,255,.03) }
   -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
 }
 
+
+/* ══════════════════════════════════
+   E-DEVLET KAYIT MODALI
+══════════════════════════════════ */
+.edev-role-card {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 16px 12px; border-radius: 12px; cursor: pointer;
+  border: 1.5px solid var(--c-border2); background: rgba(255,255,255,0.02);
+  transition: all var(--transition); text-align: center;
+}
+.edev-role-card:hover { border-color: rgba(255,255,255,0.15); background: rgba(255,255,255,0.05) }
+.edev-role-card-selected {
+  border-color: rgba(91,99,240,0.5) !important;
+  background: rgba(91,99,240,0.08) !important;
+  box-shadow: 0 0 0 3px rgba(91,99,240,0.12), 0 4px 20px rgba(91,99,240,0.15);
+}
+
+/* ══════════════════════════════════
+   E-DEVLET NAV BUTON & ROZET
+══════════════════════════════════ */
+.edevlet-nav-btn {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 14px; border-radius: 8px; font-size: .8rem; font-weight: 700;
+  color: var(--c-amber); background: var(--c-amber2);
+  border: 1px solid rgba(245,183,49,0.3);
+  cursor: pointer; transition: all var(--transition);
+  animation: borderGlow 2s ease-in-out infinite;
+}
+.edevlet-nav-btn:hover {
+  background: rgba(245,183,49,0.18);
+  border-color: rgba(245,183,49,0.55);
+  box-shadow: 0 4px 16px rgba(245,183,49,0.2);
+  transform: translateY(-1px);
+}
+.edevlet-verified-badge {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 14px; border-radius: 8px; font-size: .8rem; font-weight: 700;
+  color: var(--c-green); background: var(--c-green2);
+  border: 1px solid rgba(45,212,168,0.25);
+  max-width: 180px; overflow: hidden; white-space: nowrap;
+}
+.edevlet-verified-badge span:last-child {
+  overflow: hidden; text-overflow: ellipsis;
+}
