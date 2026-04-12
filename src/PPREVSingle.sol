@@ -53,12 +53,7 @@ contract MockZKVerifier is IZKVerifier {
         bytes calldata,
         /* proof */
         bytes32[] calldata /* inputs */
-    )
-        external
-        pure
-        override
-        returns (bool)
-    {
+    ) external pure override returns (bool) {
         return true;
     }
 }
@@ -70,12 +65,7 @@ contract MockThresholdSignatureVerifier is IThresholdSigVerifier {
         bytes32,
         /* message */
         bytes calldata /* signature */
-    )
-        external
-        pure
-        override
-        returns (bool)
-    {
+    ) external pure override returns (bool) {
         return true;
     }
 }
@@ -120,6 +110,7 @@ contract PPREVSingle is ReentrancyGuard {
         LOCKED, // an application is pending
         SETTLED, // successfully settled
         CANCELLED // cancelled (future use)
+
     }
 
     enum ApplicationStatus {
@@ -127,6 +118,7 @@ contract PPREVSingle is ReentrancyGuard {
         PENDING_TRANSFER, // awaiting settlement
         SETTLED, // successfully settled
         EXPIRED // timed out
+
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -416,9 +408,12 @@ contract PPREVSingle is ReentrancyGuard {
         _verifyFreshness(_timestamp);
 
         // Build message for threshold-sig verification:
-        // hash(caller, adHash, policyId, transcriptCommitment, timestamp, nonce)
-        bytes32 sigMessage =
-            keccak256(abi.encodePacked(msg.sender, _adHash, _policyId, _transcriptCommitment, _timestamp, _nonce));
+        // hash(caller, contract, chainId, adHash, policyId, transcriptCommitment, timestamp, nonce)
+        bytes32 sigMessage = keccak256(
+            abi.encodePacked(
+                msg.sender, address(this), block.chainid, _adHash, _policyId, _transcriptCommitment, _timestamp, _nonce
+            )
+        );
         _verifyZKProof(_zkProof, _zkInputs);
         _verifyThresholdSig(sigMessage, _thresholdSig);
 
@@ -489,8 +484,11 @@ contract PPREVSingle is ReentrancyGuard {
         _consumeNonce(_nonce);
         _verifyFreshness(_timestamp);
 
-        bytes32 sigMessage =
-            keccak256(abi.encodePacked(msg.sender, _adHash, _policyId, _transcriptCommitment, _timestamp, _nonce));
+        bytes32 sigMessage = keccak256(
+            abi.encodePacked(
+                msg.sender, address(this), block.chainid, _adHash, _policyId, _transcriptCommitment, _timestamp, _nonce
+            )
+        );
         _verifyZKProof(_zkProof, _zkInputs);
         _verifyThresholdSig(sigMessage, _thresholdSig);
 
@@ -560,7 +558,11 @@ contract PPREVSingle is ReentrancyGuard {
             revert ApplicationExpiredCannotSettle(_appId);
         }
 
-        bytes32 sigMessage = keccak256(abi.encodePacked(msg.sender, _appId, _transcriptCommitment, _timestamp, _nonce));
+        bytes32 sigMessage = keccak256(
+            abi.encodePacked(
+                msg.sender, address(this), block.chainid, _appId, _transcriptCommitment, _timestamp, _nonce
+            )
+        );
         _verifyZKProof(_zkProof, _zkInputs);
         _verifyThresholdSig(sigMessage, _thresholdSig);
 

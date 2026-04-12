@@ -37,9 +37,8 @@ contract PPREVSingleTest is Test {
         sigVerifier = new MockThresholdSignatureVerifier();
 
         // Deploy protocol
-        protocol = new PPREVSingle(
-            address(zkVerifier), address(sigVerifier), FRESHNESS_WINDOW, EXPIRY_TIMEOUT, MIN_COLLATERAL
-        );
+        protocol =
+            new PPREVSingle(address(zkVerifier), address(sigVerifier), FRESHNESS_WINDOW, EXPIRY_TIMEOUT, MIN_COLLATERAL);
 
         // Whitelist the test policy
         protocol.whitelistPolicy(POLICY_ID, true);

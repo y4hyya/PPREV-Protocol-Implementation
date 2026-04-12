@@ -1,18 +1,103 @@
-# ──────────────────────────────────────────────────────────────
-#  PPREV Protocol — Docker Compose
-# ──────────────────────────────────────────────────────────────
-#  Quick commands:
-#    docker compose up --build        → Run full simulation
-#    docker compose run pprev deploy  → Deploy only
-#    docker compose run pprev test    → Run Hardhat tests
-# ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  PPREV Protocol — Docker Compose (v2 — Realistic Simulation)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+#  Services:
+#    anvil    → Local Ethereum node (Foundry Anvil, port 8545)
+#    deploy   → Deploys PPREVSingle + whitelists policies, writes addresses
+#    notary   → Notary Network server (ECDSA attestations, port 3001)
+#    frontend → Nginx serving the Web3 frontend (port 3000)
+#
+#  Usage:
+#    docker compose up --build          → Full simulation
+#    docker compose up anvil notary     → Only blockchain + notary
+#    docker compose logs notary -f      → Watch notary attestation logs
+#    docker compose down -v             → Stop and clean up
+# ══════════════════════════════════════════════════════════════════════════════
 
 services:
-  pprev:
-    build: .
-    container_name: pprev-simulation
-    # Override default command with: docker compose run pprev <cmd>
-    # Examples:
-    #   npx hardhat run scripts/deploy.ts
-    #   npx hardhat run scripts/simulate.ts
-    #   npx hardhat test
+
+  # ── Anvil: Local Ethereum Node ──────────────────────────────────────────
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    container_name: pprev-anvil
+    entrypoint: anvil
+    command: >
+      --host 0.0.0.0
+      --port 8545
+      --chain-id 31337
+      --block-time 1
+      --accounts 10
+      --mnemonic "test test test test test test test test test test test junk"
+    ports:
+      - "8545:8545"
+    healthcheck:
+      test: ["CMD", "cast", "block-number", "--rpc-url", "http://localhost:8545"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pprev-net
+
+  # ── Deploy: Contract Deployment ────────────────────────────────────────
+  deploy:
+    build:
+      context: .
+      dockerfile: Dockerfile.deploy
+    container_name: pprev-deploy
+    depends_on:
+      anvil:
+        condition: service_healthy
+    environment:
+      - RPC_URL=http://anvil:8545
+      - CHAIN_ID=31337
+    volumes:
+      - addresses:/app/addresses
+    networks:
+      - pprev-net
+
+  # ── Notary: Attestation Server ─────────────────────────────────────────
+  notary:
+    build:
+      context: .
+      dockerfile: Dockerfile.notary
+    container_name: pprev-notary
+    depends_on:
+      deploy:
+        condition: service_completed_successfully
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/notary/info',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pprev-net
+
+  # ── Frontend: Web UI ───────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: pprev-frontend
+    depends_on:
+      notary:
+        condition: service_healthy
+      deploy:
+        condition: service_completed_successfully
+    ports:
+      - "3000:80"
+    volumes:
+      - addresses:/usr/share/nginx/html/addresses:ro
+    networks:
+      - pprev-net
+
+volumes:
+  addresses:
+
+networks:
+  pprev-net:
+    driver: bridge
