@@ -56,8 +56,9 @@ contract PPREVSecurityTest is Test {
         zkVerifier = new MockZKVerifier();
         sigVerifier = new MockThresholdSignatureVerifier();
 
-        protocol =
-            new PPREVSingle(address(zkVerifier), address(sigVerifier), FRESHNESS_WINDOW, EXPIRY_TIMEOUT, MIN_COLLATERAL);
+        protocol = new PPREVSingle(
+            address(zkVerifier), address(sigVerifier), FRESHNESS_WINDOW, EXPIRY_TIMEOUT, MIN_COLLATERAL
+        );
         protocol.whitelistPolicy(POLICY_ID, true);
 
         vm.deal(lister, 10 ether);

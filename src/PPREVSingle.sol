@@ -53,7 +53,12 @@ contract MockZKVerifier is IZKVerifier {
         bytes calldata,
         /* proof */
         bytes32[] calldata /* inputs */
-    ) external pure override returns (bool) {
+    )
+        external
+        pure
+        override
+        returns (bool)
+    {
         return true;
     }
 }
@@ -65,7 +70,12 @@ contract MockThresholdSignatureVerifier is IThresholdSigVerifier {
         bytes32,
         /* message */
         bytes calldata /* signature */
-    ) external pure override returns (bool) {
+    )
+        external
+        pure
+        override
+        returns (bool)
+    {
         return true;
     }
 }
@@ -110,7 +120,6 @@ contract PPREVSingle is ReentrancyGuard {
         LOCKED, // an application is pending
         SETTLED, // successfully settled
         CANCELLED // cancelled (future use)
-
     }
 
     enum ApplicationStatus {
@@ -118,7 +127,6 @@ contract PPREVSingle is ReentrancyGuard {
         PENDING_TRANSFER, // awaiting settlement
         SETTLED, // successfully settled
         EXPIRED // timed out
-
     }
 
     // ────────────────────────────────────────────────────────────────────────
