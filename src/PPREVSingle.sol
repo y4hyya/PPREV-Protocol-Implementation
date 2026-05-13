@@ -3,18 +3,42 @@ pragma solidity ^0.8.24;
 
 /*
  * ============================================================================
- *  PPREV Protocol — Single-File MVP
+ *  PPREV — Privacy-Preserving Real Estate Verification Protocol
  * ============================================================================
- *  Phases:
- *    1. Listing Registration
- *    2. Application
- *    3. Settlement
- *    4. Expiration
+ *  On-chain enforcement layer for the protocol described in Section V of
+ *  the PPREV IEEE conference paper.
  *
- *  This file contains:
- *    - Verifier interfaces
- *    - Mock verifier implementations (for local simulation)
- *    - The main PPREVSingle contract
+ *  Six on-chain operations (paper Sec. V):
+ *    register(txData, policyId_R/A/S, salt, ...)   — Phase 1 (phi_R)
+ *    applyTx(txID, ...)                            — Phase 2 application (phi_A)
+ *    engage(appId, lockWindow)                     — Phase 2 engagement
+ *    settle(engId, ...)                            — Phase 3 (phi_S)
+ *    expire(engId)                                 — engagement timeout
+ *    cancel(txID)                                  — listing-owner cancel
+ *
+ *  Transaction commitment (paper Eq. 1):
+ *    C_tx = H(txData || policyID_R || r)
+ *  Used as the transaction identifier txID throughout this implementation
+ *  (paper writes txID and C_tx as separate fields; they collapse to one
+ *  value here, so duplicate field references are included once).
+ *
+ *  Notary attestation (paper Eq. 4 / 7 / 9):
+ *    sigma = Sign(sk_notary, x || addr_SC)
+ *  where x is the phase-specific public statement:
+ *    x_R = (C_tx, txDataHash, policyID_R, eta_R, t_auth_R)
+ *    x_A = (txID,             policyID_A, eta_A, t_auth_A)
+ *    x_S = (engID, txID,      policyID_S, eta_S, t_auth_S)
+ *  txDataHash = keccak256(txData) substitutes for the variable-length txData
+ *  field in the on-chain hash; the binding remains since H is
+ *  collision-resistant. The on-chain check enforces only
+ *  Verify(vk_notary, sigma, x || addr_SC). The ZK proof pi is verified by
+ *  the notary off-chain and never submitted on-chain (paper Sec. V.B).
+ *
+ *  NOTE on signature scope: per paper V.B-V.D, the signed message does not
+ *  bind msg.sender. A sigma observed in the mempool can be resubmitted by a
+ *  different EOA, who would become the listing owner / applicant. This
+ *  matches paper-literal behavior; a deployment that wants signature-
+ *  forwarding protection would add msg.sender to the signed bytes.
  * ============================================================================
  */
 
@@ -23,67 +47,30 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 // ============================================================================
-//  SECTION 1: Verifier Interfaces
+//  Notary verifier interface and reference implementations
 // ============================================================================
 
-/// @notice Interface for zero-knowledge proof verification.
-interface IZKVerifier {
-    /// @param proof   Encoded ZK proof bytes.
-    /// @param inputs  Public inputs to the proof circuit.
-    /// @return valid  True when the proof verifies against `inputs`.
-    function verifyProof(bytes calldata proof, bytes32[] calldata inputs) external view returns (bool valid);
-}
-
-/// @notice Interface for threshold-signature verification.
-interface IThresholdSigVerifier {
-    /// @param message   The message that was signed.
-    /// @param signature Aggregated threshold signature bytes.
+/// @notice Interface for notary attestation signature verification.
+interface INotaryVerifier {
+    /// @param message   keccak256 of the signed payload (x || addr_SC).
+    /// @param signature Notary signature bytes.
     /// @return valid    True when the signature is valid for `message`.
     function verifySignature(bytes32 message, bytes calldata signature) external view returns (bool valid);
 }
 
-// ============================================================================
-//  SECTION 2: Mock Verifier Contracts (for local / Docker simulation)
-// ============================================================================
-
-/// @title MockZKVerifier
-/// @notice Always-pass stub for ZK proof verification. NEVER use in production.
-contract MockZKVerifier is IZKVerifier {
-    function verifyProof(
-        bytes calldata,
-        /* proof */
-        bytes32[] calldata /* inputs */
-    )
-        external
-        pure
-        override
-        returns (bool)
-    {
-        return true;
-    }
-}
-
-/// @title MockThresholdSignatureVerifier
-/// @notice Always-pass stub for threshold-signature verification. NEVER use in production.
-contract MockThresholdSignatureVerifier is IThresholdSigVerifier {
-    function verifySignature(
-        bytes32,
-        /* message */
-        bytes calldata /* signature */
-    )
-        external
-        pure
-        override
-        returns (bool)
-    {
+/// @title MockNotaryVerifier
+/// @notice Always-pass stub. Used for baseline gas measurement. NEVER use in production.
+contract MockNotaryVerifier is INotaryVerifier {
+    function verifySignature(bytes32, bytes calldata) external pure override returns (bool) {
         return true;
     }
 }
 
 /// @title ECDSANotaryVerifier
-/// @notice Verifies EIP-191 ECDSA signatures from a known notary address.
-///         Production replacement for MockThresholdSignatureVerifier.
-contract ECDSANotaryVerifier is IThresholdSigVerifier {
+/// @notice EIP-191 ECDSA verifier for a single fixed notary address.
+///         Used in binding-category security tests and as the
+///         single-notary reference for deployment.
+contract ECDSANotaryVerifier is INotaryVerifier {
     address public immutable notaryAddress;
 
     error InvalidNotaryAddress();
@@ -93,625 +80,578 @@ contract ECDSANotaryVerifier is IThresholdSigVerifier {
         notaryAddress = _notaryAddress;
     }
 
-    /// @notice Verify that `signature` over `message` was produced by the notary.
-    /// @dev Applies EIP-191 prefix before ecrecover, matching ethers.js signMessage().
     function verifySignature(bytes32 message, bytes calldata signature) external view override returns (bool) {
         bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(message);
-        address recovered = ECDSA.recover(ethSignedHash, signature);
+        (address recovered, ECDSA.RecoverError err,) = ECDSA.tryRecover(ethSignedHash, signature);
+        if (err != ECDSA.RecoverError.NoError) return false;
         return recovered == notaryAddress;
     }
 }
 
 // ============================================================================
-//  SECTION 3: PPREVSingle — Main Contract
+//  PPREVSingle — Main Contract
 // ============================================================================
 
 /// @title PPREVSingle
-/// @notice Minimal MVP of the PPREV protocol for local Docker-based simulation.
-///         Includes listing registration, application, settlement, and expiration.
+/// @notice Single-file on-chain enforcement layer for the PPREV protocol.
 contract PPREVSingle is ReentrancyGuard {
     // ────────────────────────────────────────────────────────────────────────
-    //  3a. Enums
+    //  Enums
     // ────────────────────────────────────────────────────────────────────────
 
-    enum ListingStatus {
-        NONE, // default / not created
-        ACTIVE, // open for applications
-        LOCKED, // an application is pending
-        SETTLED, // successfully settled
-        CANCELLED // cancelled (future use)
+    /// @dev Paper Sec. V.A. EXPIRED is not represented as a listing state;
+    ///      after an engagement expiration the listing returns to ACTIVE
+    ///      (or to CANCELLED once expirationCount reaches maxExpirations).
+    enum TxState {
+        NONE,
+        ACTIVE,
+        LOCKED,
+        SETTLED,
+        CANCELLED
     }
 
-    enum ApplicationStatus {
-        NONE, // default / not created
-        PENDING_TRANSFER, // awaiting settlement
-        SETTLED, // successfully settled
-        EXPIRED // timed out
+    enum AppStatus {
+        NONE,
+        PENDING,
+        ENGAGED,
+        EXPIRED,
+        CANCELLED
+    }
+
+    enum EngStatus {
+        NONE,
+        ACTIVE,
+        SETTLED,
+        EXPIRED
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    //  3b. Structs
+    //  Structs
     // ────────────────────────────────────────────────────────────────────────
 
     struct Listing {
+        bytes32 txID; // == C_tx by construction
         address owner;
-        bytes32 adHash;
-        bytes32 policyId;
+        bytes32 policyId_R;
+        bytes32 policyId_A;
+        bytes32 policyId_S;
         uint256 reqEscrow;
-        bytes32 transcriptCommitment;
         uint256 collateral;
         uint256 createdAt;
-        ListingStatus status;
+        TxState state;
         uint256 expirationCount;
+        bytes32 txDataHash;
     }
 
     struct Application {
         bytes32 appId;
-        bytes32 adHash;
+        bytes32 txID;
         address applicant;
-        bytes32 policyId;
-        bytes32 transcriptCommitment;
-        uint256 escrowAmount;
+        uint256 escrow;
         uint256 createdAt;
-        ApplicationStatus status;
+        AppStatus status;
+    }
+
+    struct Engagement {
+        bytes32 engId;
+        bytes32 txID;
+        bytes32 appId;
+        uint256 expiresAt;
+        EngStatus status;
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    //  3c. Custom Errors
+    //  Custom Errors
     // ────────────────────────────────────────────────────────────────────────
 
-    error NotOwner();
+    error NotAdmin();
     error NonceAlreadyUsed(bytes32 nonce);
-    error InvalidZKProof();
-    error InvalidThresholdSignature();
+    error InvalidNotarySignature();
     error FreshnessWindowExceeded(uint256 timestamp, uint256 currentTime);
     error InsufficientCollateral(uint256 sent, uint256 required);
     error InsufficientEscrow(uint256 sent, uint256 required);
-    error ListingNotActive(bytes32 adHash);
-    error ListingNotLocked(bytes32 adHash);
-    error PolicyMismatch(bytes32 expected, bytes32 provided);
-    error DuplicateApplication(bytes32 appId);
+    error TxNotActive(bytes32 txID);
+    error TxNotLocked(bytes32 txID);
+    error TxAlreadyExists(bytes32 txID);
     error ApplicationNotFound(bytes32 appId);
     error ApplicationNotPending(bytes32 appId);
-    error ApplicationNotExpired(bytes32 appId);
+    error EngagementNotFound(bytes32 engId);
+    error EngagementNotActive(bytes32 engId);
     error CallerNotListingOwner(address caller, address owner);
-    error ApplicationNotYetExpirable(bytes32 appId, uint256 expiresAt);
+    error EngagementAlreadyExpired(bytes32 engId);
+    error EngagementNotYetExpirable(bytes32 engId, uint256 expiresAt);
     error PolicyNotWhitelisted(bytes32 policyId);
     error TransferFailed();
-    error ListingAlreadyExists(bytes32 adHash);
     error InvalidEscrowAmount();
     error InvalidVerifierAddress();
-    error ApplicationExpiredCannotSettle(bytes32 appId);
     error CannotApplyToOwnListing();
+    error DuplicateApplication(bytes32 appId);
+    error EmptyTxData();
 
     // ────────────────────────────────────────────────────────────────────────
-    //  3d. Events
+    //  Events
     // ────────────────────────────────────────────────────────────────────────
 
-    event ListingRegistered(
-        bytes32 indexed adHash, address indexed owner, bytes32 policyId, uint256 reqEscrow, uint256 collateral
+    event TxRegistered(
+        bytes32 indexed txID,
+        address indexed owner,
+        bytes32 policyId_R,
+        bytes32 policyId_A,
+        bytes32 policyId_S,
+        uint256 reqEscrow,
+        uint256 collateral
     );
 
-    event ApplicationCreated(
-        bytes32 indexed appId, bytes32 indexed adHash, address indexed applicant, uint256 escrowAmount
-    );
+    event ApplicationCreated(bytes32 indexed appId, bytes32 indexed txID, address indexed applicant, uint256 escrow);
 
-    event ApplicationSettled(
-        bytes32 indexed appId,
-        bytes32 indexed adHash,
+    event Engaged(bytes32 indexed engId, bytes32 indexed txID, bytes32 indexed appId, address owner, uint256 expiresAt);
+
+    event Settled(
+        bytes32 indexed engId,
+        bytes32 indexed txID,
         address indexed applicant,
         uint256 escrowTransferred,
         uint256 collateralReturned
     );
 
-    event ApplicationExpired(
-        bytes32 indexed appId,
-        bytes32 indexed adHash,
+    event Expired(
+        bytes32 indexed engId,
+        bytes32 indexed txID,
         address indexed applicant,
         uint256 escrowReturned,
         uint256 slashAmount
     );
 
-    event ListingCancelled(bytes32 indexed adHash, address indexed owner, uint256 collateralReturned);
+    event Cancelled(bytes32 indexed txID, address indexed owner, uint256 collateralReturned);
 
-    event VerifierUpdated(string verifierType, address newAddress);
+    event NotaryVerifierUpdated(address newAddress);
     event PolicyWhitelisted(bytes32 indexed policyId, bool allowed);
     event ConfigUpdated(string key, uint256 value);
 
     // ────────────────────────────────────────────────────────────────────────
-    //  3e. State Variables
+    //  State
     // ────────────────────────────────────────────────────────────────────────
 
-    /// @notice Contract admin / deployer.
-    address public owner;
+    /// @notice Contract administrator (deployer).
+    address public admin;
 
-    /// @notice Reference to the ZK proof verifier contract.
-    IZKVerifier public zkVerifier;
+    /// @notice Notary attestation signature verifier.
+    INotaryVerifier public notaryVerifier;
 
-    /// @notice Reference to the threshold-signature verifier contract.
-    IThresholdSigVerifier public thresholdVerifier;
-
-    /// @notice Maximum age (in seconds) for submitted timestamps.
+    /// @notice Maximum age (seconds) for submitted attestation timestamps (paper Δ).
     uint256 public freshnessWindow;
 
-    /// @notice Duration (in seconds) after which an application can be expired.
-    uint256 public expiryTimeout;
+    /// @notice Default lock window (seconds) applied when engage() is called with _lockWindow == 0
+    ///         (paper τ_lock; per-engagement overrides take precedence).
+    uint256 public defaultLockWindow;
 
-    /// @notice Minimum collateral required for listing registration.
+    /// @notice Minimum collateral required at registration (in wei).
     uint256 public minCollateral;
 
-    /// @notice Maximum number of expirations before a listing is auto-cancelled.
+    /// @notice Maximum number of engagement expirations before listing auto-cancels.
     uint256 public maxExpirations = 5;
 
-    /// @dev adHash → Listing
+    /// @dev txID (== C_tx) → Listing
     mapping(bytes32 => Listing) public listings;
 
     /// @dev appId → Application
     mapping(bytes32 => Application) public applications;
 
-    /// @dev nonce → used flag  (replay protection)
+    /// @dev engId → Engagement
+    mapping(bytes32 => Engagement) public engagements;
+
+    /// @dev nonce → consumed flag (single-use, global across phases — see paper V.C cross-phase substitution)
     mapping(bytes32 => bool) public usedNonces;
 
     /// @dev policyId → whitelisted flag
     mapping(bytes32 => bool) public whitelistedPolicies;
 
-    /// @dev adHash → (applicant → active appId), used to prevent duplicate active applications
+    /// @dev txID → (applicant → currently pending appId). Cleared on engage/expire/settle.
     mapping(bytes32 => mapping(address => bytes32)) public activeApplications;
 
     // ────────────────────────────────────────────────────────────────────────
-    //  3f. Modifiers
+    //  Modifiers
     // ────────────────────────────────────────────────────────────────────────
 
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
+    modifier onlyAdmin() {
+        if (msg.sender != admin) revert NotAdmin();
         _;
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    //  3g. Constructor
+    //  Constructor
     // ────────────────────────────────────────────────────────────────────────
 
-    /// @param _zkVerifier          Address of the IZKVerifier implementation.
-    /// @param _thresholdVerifier   Address of the IThresholdSigVerifier implementation.
-    /// @param _freshnessWindow     Maximum age (seconds) for submitted timestamps.
-    /// @param _expiryTimeout       Seconds before an application becomes expirable.
-    /// @param _minCollateral       Minimum collateral in wei for listing registration.
-    constructor(
-        address _zkVerifier,
-        address _thresholdVerifier,
-        uint256 _freshnessWindow,
-        uint256 _expiryTimeout,
-        uint256 _minCollateral
-    ) {
-        if (_zkVerifier == address(0)) revert InvalidVerifierAddress();
-        if (_thresholdVerifier == address(0)) revert InvalidVerifierAddress();
-        owner = msg.sender;
-        zkVerifier = IZKVerifier(_zkVerifier);
-        thresholdVerifier = IThresholdSigVerifier(_thresholdVerifier);
+    /// @param _notaryVerifier    INotaryVerifier implementation address.
+    /// @param _freshnessWindow   Δ in seconds.
+    /// @param _defaultLockWindow Default τ_lock in seconds when engage() passes 0.
+    /// @param _minCollateral     Minimum wei required at registration.
+    constructor(address _notaryVerifier, uint256 _freshnessWindow, uint256 _defaultLockWindow, uint256 _minCollateral) {
+        if (_notaryVerifier == address(0)) revert InvalidVerifierAddress();
+        admin = msg.sender;
+        notaryVerifier = INotaryVerifier(_notaryVerifier);
         freshnessWindow = _freshnessWindow;
-        expiryTimeout = _expiryTimeout;
+        defaultLockWindow = _defaultLockWindow;
         minCollateral = _minCollateral;
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  SECTION 4: Admin Functions
+    //  Admin
     // ════════════════════════════════════════════════════════════════════════
 
-    /// @notice Update the ZK verifier contract address.
-    function setZKVerifier(address _zkVerifier) external onlyOwner {
-        if (_zkVerifier == address(0)) revert InvalidVerifierAddress();
-        zkVerifier = IZKVerifier(_zkVerifier);
-        emit VerifierUpdated("ZKVerifier", _zkVerifier);
+    function setNotaryVerifier(address _v) external onlyAdmin {
+        if (_v == address(0)) revert InvalidVerifierAddress();
+        notaryVerifier = INotaryVerifier(_v);
+        emit NotaryVerifierUpdated(_v);
     }
 
-    /// @notice Update the threshold-signature verifier contract address.
-    function setThresholdVerifier(address _thresholdVerifier) external onlyOwner {
-        if (_thresholdVerifier == address(0)) revert InvalidVerifierAddress();
-        thresholdVerifier = IThresholdSigVerifier(_thresholdVerifier);
-        emit VerifierUpdated("ThresholdVerifier", _thresholdVerifier);
+    function setFreshnessWindow(uint256 _w) external onlyAdmin {
+        freshnessWindow = _w;
+        emit ConfigUpdated("freshnessWindow", _w);
     }
 
-    /// @notice Update the freshness window.
-    function setFreshnessWindow(uint256 _freshnessWindow) external onlyOwner {
-        freshnessWindow = _freshnessWindow;
-        emit ConfigUpdated("freshnessWindow", _freshnessWindow);
+    function setDefaultLockWindow(uint256 _w) external onlyAdmin {
+        defaultLockWindow = _w;
+        emit ConfigUpdated("defaultLockWindow", _w);
     }
 
-    /// @notice Update the expiry timeout.
-    function setExpiryTimeout(uint256 _expiryTimeout) external onlyOwner {
-        expiryTimeout = _expiryTimeout;
-        emit ConfigUpdated("expiryTimeout", _expiryTimeout);
+    function setMinCollateral(uint256 _c) external onlyAdmin {
+        minCollateral = _c;
+        emit ConfigUpdated("minCollateral", _c);
     }
 
-    /// @notice Update the minimum collateral.
-    function setMinCollateral(uint256 _minCollateral) external onlyOwner {
-        minCollateral = _minCollateral;
-        emit ConfigUpdated("minCollateral", _minCollateral);
+    function setMaxExpirations(uint256 _m) external onlyAdmin {
+        maxExpirations = _m;
+        emit ConfigUpdated("maxExpirations", _m);
     }
 
-    /// @notice Update the maximum expiration count before auto-cancel.
-    function setMaxExpirations(uint256 _maxExpirations) external onlyOwner {
-        maxExpirations = _maxExpirations;
-        emit ConfigUpdated("maxExpirations", _maxExpirations);
-    }
-
-    /// @notice Whitelist or un-whitelist a policy.
-    function whitelistPolicy(bytes32 _policyId, bool _allowed) external onlyOwner {
-        whitelistedPolicies[_policyId] = _allowed;
-        emit PolicyWhitelisted(_policyId, _allowed);
+    function whitelistPolicy(bytes32 _p, bool _a) external onlyAdmin {
+        whitelistedPolicies[_p] = _a;
+        emit PolicyWhitelisted(_p, _a);
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  SECTION 5: Internal Verification Helpers
+    //  Internal helpers
     // ════════════════════════════════════════════════════════════════════════
 
-    /// @dev Marks a nonce as used; reverts if already consumed.
     function _consumeNonce(bytes32 _nonce) internal {
         if (usedNonces[_nonce]) revert NonceAlreadyUsed(_nonce);
         usedNonces[_nonce] = true;
     }
 
-    /// @dev Ensures the submitted timestamp is within the freshness window.
     function _verifyFreshness(uint256 _timestamp) internal view {
         if (block.timestamp > _timestamp + freshnessWindow) {
             revert FreshnessWindowExceeded(_timestamp, block.timestamp);
         }
     }
 
-    /// @dev Delegates to the ZK verifier contract.
-    function _verifyZKProof(bytes calldata _proof, bytes32[] calldata _inputs) internal view {
-        if (!zkVerifier.verifyProof(_proof, _inputs)) {
-            revert InvalidZKProof();
-        }
-    }
-
-    /// @dev Delegates to the threshold-signature verifier contract.
-    function _verifyThresholdSig(bytes32 _message, bytes calldata _signature) internal view {
-        if (!thresholdVerifier.verifySignature(_message, _signature)) {
-            revert InvalidThresholdSignature();
+    function _verifyNotarySig(bytes32 _message, bytes calldata _signature) internal view {
+        if (!notaryVerifier.verifySignature(_message, _signature)) {
+            revert InvalidNotarySignature();
         }
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  SECTION 6: Phase 1 — Listing Registration
+    //  Phase 1 — Register (paper V.B)
     // ════════════════════════════════════════════════════════════════════════
 
-    /// @notice Register a new listing.
-    /// @dev Caller must send ETH >= minCollateral as collateral deposit.
-    /// @param _adHash              Unique ad content hash.
-    /// @param _policyId            Compliance policy identifier (must be whitelisted).
-    /// @param _reqEscrow           Escrow amount applicants must deposit (in wei).
-    /// @param _transcriptCommitment Commitment hash for the credential transcript.
-    /// @param _timestamp           Freshness timestamp.
-    /// @param _nonce               Unique nonce for replay protection.
-    /// @param _zkProof             Encoded ZK proof bytes.
-    /// @param _zkInputs            Public inputs for ZK proof verification.
-    /// @param _thresholdSig        Threshold signature bytes.
-    function registerListing(
-        bytes32 _adHash,
-        bytes32 _policyId,
+    /// @notice Register a new transaction. Caller becomes the listing owner.
+    /// @dev    Requires msg.value >= minCollateral as collateral deposit.
+    ///         All three policy IDs must be whitelisted.
+    /// @param _txData        Public transaction parameters (paper txData).
+    /// @param _policyId_R    Registration predicate identifier.
+    /// @param _policyId_A    Application predicate identifier.
+    /// @param _policyId_S    Settlement predicate identifier.
+    /// @param _salt          Random salt r entering C_tx (paper Eq. 1).
+    /// @param _reqEscrow     Escrow amount applicants must deposit (wei).
+    /// @param _nonce         Single-use registration nonce η_R.
+    /// @param _timestamp     Attestation timestamp t_auth,R.
+    /// @param _sigma         Notary attestation σ_R over x_R || addr_SC.
+    /// @return txID          Assigned transaction identifier (= C_tx).
+    function register(
+        bytes calldata _txData,
+        bytes32 _policyId_R,
+        bytes32 _policyId_A,
+        bytes32 _policyId_S,
+        bytes32 _salt,
         uint256 _reqEscrow,
-        bytes32 _transcriptCommitment,
-        uint256 _timestamp,
         bytes32 _nonce,
-        bytes calldata _zkProof,
-        bytes32[] calldata _zkInputs,
-        bytes calldata _thresholdSig
-    ) external payable nonReentrant {
-        // --- Checks ---
-        if (listings[_adHash].status != ListingStatus.NONE) {
-            revert ListingAlreadyExists(_adHash);
-        }
-        if (!whitelistedPolicies[_policyId]) {
-            revert PolicyNotWhitelisted(_policyId);
-        }
-        if (msg.value < minCollateral) {
-            revert InsufficientCollateral(msg.value, minCollateral);
-        }
-        if (_reqEscrow == 0) {
-            revert InvalidEscrowAmount();
-        }
+        uint256 _timestamp,
+        bytes calldata _sigma
+    ) external payable nonReentrant returns (bytes32 txID) {
+        // Checks
+        if (_txData.length == 0) revert EmptyTxData();
+        if (!whitelistedPolicies[_policyId_R]) revert PolicyNotWhitelisted(_policyId_R);
+        if (!whitelistedPolicies[_policyId_A]) revert PolicyNotWhitelisted(_policyId_A);
+        if (!whitelistedPolicies[_policyId_S]) revert PolicyNotWhitelisted(_policyId_S);
+        if (msg.value < minCollateral) revert InsufficientCollateral(msg.value, minCollateral);
+        if (_reqEscrow == 0) revert InvalidEscrowAmount();
+
+        // C_tx = H(txData || policyID_R || r)
+        txID = keccak256(abi.encodePacked(_txData, _policyId_R, _salt));
+        if (listings[txID].state != TxState.NONE) revert TxAlreadyExists(txID);
 
         _consumeNonce(_nonce);
         _verifyFreshness(_timestamp);
 
-        // Build message for threshold-sig verification:
-        // hash(caller, contract, chainId, adHash, policyId, transcriptCommitment, timestamp, nonce)
-        bytes32 sigMessage = keccak256(
-            abi.encodePacked(
-                msg.sender, address(this), block.chainid, _adHash, _policyId, _transcriptCommitment, _timestamp, _nonce
-            )
-        );
-        _verifyZKProof(_zkProof, _zkInputs);
-        _verifyThresholdSig(sigMessage, _thresholdSig);
+        // sigma_R = Sign(sk, x_R || addr_SC), x_R = (C_tx, H(txData), policyID_R, eta_R, t_auth_R)
+        bytes32 txDataHash = keccak256(_txData);
+        bytes32 sigMessage =
+            keccak256(abi.encodePacked(txID, txDataHash, _policyId_R, _nonce, _timestamp, address(this)));
+        _verifyNotarySig(sigMessage, _sigma);
 
-        // --- Effects ---
-        listings[_adHash] = Listing({
+        // Effects
+        listings[txID] = Listing({
+            txID: txID,
             owner: msg.sender,
-            adHash: _adHash,
-            policyId: _policyId,
+            policyId_R: _policyId_R,
+            policyId_A: _policyId_A,
+            policyId_S: _policyId_S,
             reqEscrow: _reqEscrow,
-            transcriptCommitment: _transcriptCommitment,
             collateral: msg.value,
             createdAt: block.timestamp,
-            status: ListingStatus.ACTIVE,
-            expirationCount: 0
+            state: TxState.ACTIVE,
+            expirationCount: 0,
+            txDataHash: txDataHash
         });
 
-        emit ListingRegistered(_adHash, msg.sender, _policyId, _reqEscrow, msg.value);
+        emit TxRegistered(txID, msg.sender, _policyId_R, _policyId_A, _policyId_S, _reqEscrow, msg.value);
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  SECTION 7: Phase 2 — Application
+    //  Phase 2 — Apply (paper V.C application step)
     // ════════════════════════════════════════════════════════════════════════
 
-    /// @notice Submit an application to an active listing.
-    /// @dev Caller must send ETH >= listing.reqEscrow as escrow deposit.
-    /// @param _adHash              Ad hash of the target listing.
-    /// @param _policyId            Policy that must match the listing.
-    /// @param _transcriptCommitment Commitment hash for the applicant's transcript.
-    /// @param _timestamp           Freshness timestamp.
-    /// @param _nonce               Unique nonce for replay protection.
-    /// @param _zkProof             Encoded ZK proof bytes.
-    /// @param _zkInputs            Public inputs for ZK proof verification.
-    /// @param _thresholdSig        Threshold signature bytes.
-    function applyToListing(
-        bytes32 _adHash,
-        bytes32 _policyId,
-        bytes32 _transcriptCommitment,
-        uint256 _timestamp,
-        bytes32 _nonce,
-        bytes calldata _zkProof,
-        bytes32[] calldata _zkInputs,
-        bytes calldata _thresholdSig
-    ) external payable nonReentrant {
-        Listing storage listing = listings[_adHash];
+    /// @notice Submit an application for an active transaction. Records the
+    ///         applicant's escrow and a PENDING application; does NOT lock
+    ///         the listing (engagement is a separate step, paper V.C).
+    /// @param _txID       Target transaction identifier.
+    /// @param _nonce      Single-use nonce η_A.
+    /// @param _timestamp  Attestation timestamp t_auth,A.
+    /// @param _sigma      Notary attestation σ_A over x_A || addr_SC.
+    /// @return appId      Assigned application identifier.
+    function applyTx(bytes32 _txID, bytes32 _nonce, uint256 _timestamp, bytes calldata _sigma)
+        external
+        payable
+        nonReentrant
+        returns (bytes32 appId)
+    {
+        Listing storage listing = listings[_txID];
 
-        // --- Checks ---
-        if (listing.status != ListingStatus.ACTIVE) {
-            revert ListingNotActive(_adHash);
-        }
-        if (msg.sender == listing.owner) {
-            revert CannotApplyToOwnListing();
-        }
-        if (listing.policyId != _policyId) {
-            revert PolicyMismatch(listing.policyId, _policyId);
-        }
-        if (msg.value < listing.reqEscrow) {
-            revert InsufficientEscrow(msg.value, listing.reqEscrow);
+        if (listing.state != TxState.ACTIVE) revert TxNotActive(_txID);
+        if (msg.sender == listing.owner) revert CannotApplyToOwnListing();
+        if (msg.value < listing.reqEscrow) revert InsufficientEscrow(msg.value, listing.reqEscrow);
+
+        // Reject if applicant already has a PENDING application for this txID
+        bytes32 existing = activeApplications[_txID][msg.sender];
+        if (existing != bytes32(0) && applications[existing].status == AppStatus.PENDING) {
+            revert DuplicateApplication(existing);
         }
 
-        // Derive appId
-        bytes32 appId = keccak256(abi.encodePacked(_adHash, msg.sender, _nonce));
-
-        // No duplicate active application by same applicant for the same listing
-        if (activeApplications[_adHash][msg.sender] != bytes32(0)) {
-            revert DuplicateApplication(activeApplications[_adHash][msg.sender]);
-        }
+        appId = keccak256(abi.encodePacked(_txID, msg.sender, _nonce));
 
         _consumeNonce(_nonce);
         _verifyFreshness(_timestamp);
 
-        bytes32 sigMessage = keccak256(
-            abi.encodePacked(
-                msg.sender, address(this), block.chainid, _adHash, _policyId, _transcriptCommitment, _timestamp, _nonce
-            )
-        );
-        _verifyZKProof(_zkProof, _zkInputs);
-        _verifyThresholdSig(sigMessage, _thresholdSig);
+        // x_A = (txID == C_tx, policyID_A, eta_A, t_auth_A); paper writes txID and C_tx as
+        // separate fields, but in this implementation they are the same value (registered
+        // listings are keyed by C_tx), so the field is included once.
+        bytes32 sigMessage = keccak256(abi.encodePacked(_txID, listing.policyId_A, _nonce, _timestamp, address(this)));
+        _verifyNotarySig(sigMessage, _sigma);
 
-        // --- Effects ---
         applications[appId] = Application({
             appId: appId,
-            adHash: _adHash,
+            txID: _txID,
             applicant: msg.sender,
-            policyId: _policyId,
-            transcriptCommitment: _transcriptCommitment,
-            escrowAmount: msg.value,
+            escrow: msg.value,
             createdAt: block.timestamp,
-            status: ApplicationStatus.PENDING_TRANSFER
+            status: AppStatus.PENDING
         });
 
-        activeApplications[_adHash][msg.sender] = appId;
-        listing.status = ListingStatus.LOCKED;
+        activeApplications[_txID][msg.sender] = appId;
 
-        emit ApplicationCreated(appId, _adHash, msg.sender, msg.value);
+        emit ApplicationCreated(appId, _txID, msg.sender, msg.value);
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  SECTION 8: Phase 3 — Settlement
+    //  Phase 2 — Engage (paper V.C engagement step)
     // ════════════════════════════════════════════════════════════════════════
 
-    /// @notice Settle a pending application. Only the listing owner may call this.
-    /// @dev Transfers escrowed ETH to the listing owner and returns collateral.
-    /// @param _appId               Application identifier.
-    /// @param _transcriptCommitment Settlement transcript commitment.
-    /// @param _timestamp           Freshness timestamp.
-    /// @param _nonce               Unique nonce for replay protection.
-    /// @param _zkProof             Encoded ZK proof bytes.
-    /// @param _zkInputs            Public inputs for ZK proof verification.
-    /// @param _thresholdSig        Threshold signature bytes.
-    function settleListing(
-        bytes32 _appId,
-        bytes32 _transcriptCommitment,
-        uint256 _timestamp,
-        bytes32 _nonce,
-        bytes calldata _zkProof,
-        bytes32[] calldata _zkInputs,
-        bytes calldata _thresholdSig
-    ) external nonReentrant {
+    /// @notice Listing owner accepts a pending application. Locks the listing
+    ///         and starts the lock window. No notary attestation required;
+    ///         authentication is via msg.sender against the recorded owner.
+    /// @param _appId       Application to engage.
+    /// @param _lockWindow  Engagement lock window in seconds. 0 ⇒ use defaultLockWindow.
+    /// @return engId       Assigned engagement identifier.
+    function engage(bytes32 _appId, uint256 _lockWindow) external nonReentrant returns (bytes32 engId) {
         Application storage app = applications[_appId];
-        if (app.status == ApplicationStatus.NONE) {
-            revert ApplicationNotFound(_appId);
-        }
+        if (app.status == AppStatus.NONE) revert ApplicationNotFound(_appId);
+        if (app.status != AppStatus.PENDING) revert ApplicationNotPending(_appId);
 
-        Listing storage listing = listings[app.adHash];
+        Listing storage listing = listings[app.txID];
+        if (msg.sender != listing.owner) revert CallerNotListingOwner(msg.sender, listing.owner);
+        if (listing.state != TxState.ACTIVE) revert TxNotActive(app.txID);
 
-        // --- Checks ---
-        if (msg.sender != listing.owner) {
-            revert CallerNotListingOwner(msg.sender, listing.owner);
-        }
-        if (app.status != ApplicationStatus.PENDING_TRANSFER) {
-            revert ApplicationNotPending(_appId);
-        }
-        if (listing.status != ListingStatus.LOCKED) {
-            revert ListingNotLocked(app.adHash);
-        }
+        uint256 lockDuration = _lockWindow == 0 ? defaultLockWindow : _lockWindow;
+        uint256 expiresAt = block.timestamp + lockDuration;
+
+        engId = keccak256(abi.encodePacked(_appId, listing.owner, address(this)));
+
+        engagements[engId] =
+            Engagement({engId: engId, txID: app.txID, appId: _appId, expiresAt: expiresAt, status: EngStatus.ACTIVE});
+
+        app.status = AppStatus.ENGAGED;
+        listing.state = TxState.LOCKED;
+
+        // The application is no longer "pending" for duplicate-check purposes.
+        activeApplications[app.txID][app.applicant] = bytes32(0);
+
+        emit Engaged(engId, app.txID, _appId, msg.sender, expiresAt);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Phase 3 — Settle (paper V.D)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// @notice Listing owner finalises a locked engagement.
+    ///         Transfers escrow to the listing owner and returns collateral.
+    /// @param _engId      Engagement to settle.
+    /// @param _nonce      Single-use nonce η_S.
+    /// @param _timestamp  Attestation timestamp t_auth,S.
+    /// @param _sigma      Notary attestation σ_S over x_S || addr_SC.
+    function settle(bytes32 _engId, bytes32 _nonce, uint256 _timestamp, bytes calldata _sigma) external nonReentrant {
+        Engagement storage eng = engagements[_engId];
+        if (eng.status == EngStatus.NONE) revert EngagementNotFound(_engId);
+        if (eng.status != EngStatus.ACTIVE) revert EngagementNotActive(_engId);
+
+        Listing storage listing = listings[eng.txID];
+        Application storage app = applications[eng.appId];
+
+        if (msg.sender != listing.owner) revert CallerNotListingOwner(msg.sender, listing.owner);
+        if (listing.state != TxState.LOCKED) revert TxNotLocked(eng.txID);
+        if (block.timestamp > eng.expiresAt) revert EngagementAlreadyExpired(_engId);
 
         _consumeNonce(_nonce);
         _verifyFreshness(_timestamp);
 
-        // Verify not expired
-        if (block.timestamp > app.createdAt + expiryTimeout) {
-            revert ApplicationExpiredCannotSettle(_appId);
-        }
+        // x_S = (engID, txID == C_tx, policyID_S, eta_S, t_auth_S); txID and C_tx collapse here
+        bytes32 sigMessage =
+            keccak256(abi.encodePacked(_engId, eng.txID, listing.policyId_S, _nonce, _timestamp, address(this)));
+        _verifyNotarySig(sigMessage, _sigma);
 
-        bytes32 sigMessage = keccak256(
-            abi.encodePacked(
-                msg.sender, address(this), block.chainid, _appId, _transcriptCommitment, _timestamp, _nonce
-            )
-        );
-        _verifyZKProof(_zkProof, _zkInputs);
-        _verifyThresholdSig(sigMessage, _thresholdSig);
-
-        // --- Effects ---
-        uint256 escrowToTransfer = app.escrowAmount;
+        // Effects
+        uint256 escrowToTransfer = app.escrow;
         uint256 collateralToReturn = listing.collateral;
 
-        app.status = ApplicationStatus.SETTLED;
-        listing.status = ListingStatus.SETTLED;
-        app.escrowAmount = 0;
+        eng.status = EngStatus.SETTLED;
+        listing.state = TxState.SETTLED;
+        app.escrow = 0;
         listing.collateral = 0;
 
-        // Clear active-application tracker
-        activeApplications[app.adHash][app.applicant] = bytes32(0);
-
-        // --- Interactions (checks-effects-interactions) ---
-        // Transfer escrowed ETH → listing owner
+        // Interactions
         (bool s1,) = payable(listing.owner).call{value: escrowToTransfer}("");
         if (!s1) revert TransferFailed();
 
-        // Return collateral → listing owner (they posted it)
         (bool s2,) = payable(listing.owner).call{value: collateralToReturn}("");
         if (!s2) revert TransferFailed();
 
-        emit ApplicationSettled(_appId, app.adHash, app.applicant, escrowToTransfer, collateralToReturn);
+        emit Settled(_engId, eng.txID, app.applicant, escrowToTransfer, collateralToReturn);
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  SECTION 9: Phase 4 — Expiration
+    //  Phase 3 — Expire (paper V.D expiration)
     // ════════════════════════════════════════════════════════════════════════
 
-    /// @notice Expire an application after the timeout has passed.
-    ///         Anyone may call this function.
-    /// @dev MVP rule: escrow is returned to the applicant, listing becomes ACTIVE again.
-    /// @param _appId The application to expire.
-    function expireApplication(bytes32 _appId) external nonReentrant {
-        Application storage app = applications[_appId];
-        if (app.status == ApplicationStatus.NONE) {
-            revert ApplicationNotFound(_appId);
-        }
-        if (app.status != ApplicationStatus.PENDING_TRANSFER) {
-            revert ApplicationNotPending(_appId);
-        }
+    /// @notice Anyone may invoke after engagement.expiresAt has passed.
+    ///         Returns escrow + 10% of remaining collateral to the applicant.
+    ///         Slashing is compounding (paper V.D): after k expirations the
+    ///         listing owner's collateral is 0.9^k of the original.
+    /// @param _engId Engagement to expire.
+    function expire(bytes32 _engId) external nonReentrant {
+        Engagement storage eng = engagements[_engId];
+        if (eng.status == EngStatus.NONE) revert EngagementNotFound(_engId);
+        if (eng.status != EngStatus.ACTIVE) revert EngagementNotActive(_engId);
+        if (block.timestamp <= eng.expiresAt) revert EngagementNotYetExpirable(_engId, eng.expiresAt);
 
-        uint256 expiresAt = app.createdAt + expiryTimeout;
-        if (block.timestamp <= expiresAt) {
-            revert ApplicationNotYetExpirable(_appId, expiresAt);
-        }
+        Listing storage listing = listings[eng.txID];
+        Application storage app = applications[eng.appId];
 
-        Listing storage listing = listings[app.adHash];
+        uint256 escrowToReturn = app.escrow;
+        uint256 slashAmount = listing.collateral / 10;
 
-        // --- Effects ---
-        uint256 escrowToReturn = app.escrowAmount;
-        uint256 slashAmount = listing.collateral / 10; // 10% of landlord collateral
-
-        app.status = ApplicationStatus.EXPIRED;
-        app.escrowAmount = 0;
+        eng.status = EngStatus.EXPIRED;
+        app.status = AppStatus.EXPIRED;
+        app.escrow = 0;
         listing.collateral -= slashAmount;
-        listing.expirationCount++;
+        listing.expirationCount += 1;
 
-        // Clear active-application tracker
-        activeApplications[app.adHash][app.applicant] = bytes32(0);
-
-        // Determine if listing should auto-cancel after too many expirations
         bool autoCancelled = listing.expirationCount >= maxExpirations;
         uint256 remainingCollateral = 0;
 
         if (autoCancelled) {
-            listing.status = ListingStatus.CANCELLED;
+            listing.state = TxState.CANCELLED;
             remainingCollateral = listing.collateral;
             listing.collateral = 0;
         } else {
-            listing.status = ListingStatus.ACTIVE;
+            listing.state = TxState.ACTIVE;
         }
 
-        // --- Interactions ---
-        // Return escrow + slash penalty to applicant
-        (bool success,) = payable(app.applicant).call{value: escrowToReturn + slashAmount}("");
-        if (!success) revert TransferFailed();
+        // Interactions
+        (bool s,) = payable(app.applicant).call{value: escrowToReturn + slashAmount}("");
+        if (!s) revert TransferFailed();
 
-        emit ApplicationExpired(_appId, app.adHash, app.applicant, escrowToReturn, slashAmount);
+        emit Expired(_engId, eng.txID, app.applicant, escrowToReturn, slashAmount);
 
-        // If auto-cancelled, return remaining collateral to listing owner
         if (autoCancelled) {
             if (remainingCollateral > 0) {
                 (bool s2,) = payable(listing.owner).call{value: remainingCollateral}("");
                 if (!s2) revert TransferFailed();
             }
-            emit ListingCancelled(app.adHash, listing.owner, remainingCollateral);
+            emit Cancelled(eng.txID, listing.owner, remainingCollateral);
         }
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  SECTION 9b: Listing Cancellation
+    //  Cancel (paper V.E)
     // ════════════════════════════════════════════════════════════════════════
 
-    /// @notice Cancel an active listing and return collateral to the owner.
-    /// @dev Only the listing owner may cancel, and only while the listing is ACTIVE.
-    /// @param _adHash The listing to cancel.
-    function cancelListing(bytes32 _adHash) external nonReentrant {
-        Listing storage listing = listings[_adHash];
+    /// @notice Listing owner cancels an active listing (no engagement in progress).
+    /// @param _txID The listing to cancel.
+    function cancel(bytes32 _txID) external nonReentrant {
+        Listing storage listing = listings[_txID];
+        if (listing.state != TxState.ACTIVE) revert TxNotActive(_txID);
+        if (msg.sender != listing.owner) revert CallerNotListingOwner(msg.sender, listing.owner);
 
-        if (listing.status != ListingStatus.ACTIVE) {
-            revert ListingNotActive(_adHash);
-        }
-        if (msg.sender != listing.owner) {
-            revert CallerNotListingOwner(msg.sender, listing.owner);
-        }
-
-        // --- Effects ---
         uint256 collateralToReturn = listing.collateral;
-        listing.status = ListingStatus.CANCELLED;
+        listing.state = TxState.CANCELLED;
         listing.collateral = 0;
 
-        // --- Interactions ---
-        (bool success,) = payable(listing.owner).call{value: collateralToReturn}("");
-        if (!success) revert TransferFailed();
+        (bool s,) = payable(listing.owner).call{value: collateralToReturn}("");
+        if (!s) revert TransferFailed();
 
-        emit ListingCancelled(_adHash, listing.owner, collateralToReturn);
+        emit Cancelled(_txID, listing.owner, collateralToReturn);
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  SECTION 10: View / Helper Functions
+    //  Views
     // ════════════════════════════════════════════════════════════════════════
 
-    /// @notice Retrieve full listing details.
-    function getListing(bytes32 _adHash) external view returns (Listing memory) {
-        return listings[_adHash];
+    function getListing(bytes32 _txID) external view returns (Listing memory) {
+        return listings[_txID];
     }
 
-    /// @notice Retrieve full application details.
     function getApplication(bytes32 _appId) external view returns (Application memory) {
         return applications[_appId];
     }
 
-    /// @notice Check whether a nonce has been consumed.
+    function getEngagement(bytes32 _engId) external view returns (Engagement memory) {
+        return engagements[_engId];
+    }
+
     function isNonceUsed(bytes32 _nonce) external view returns (bool) {
         return usedNonces[_nonce];
     }
 
-    /// @notice Check whether a policy is whitelisted.
     function isPolicyWhitelisted(bytes32 _policyId) external view returns (bool) {
         return whitelistedPolicies[_policyId];
     }

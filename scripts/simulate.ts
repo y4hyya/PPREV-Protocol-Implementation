@@ -3,365 +3,297 @@
  *  PPREV Protocol — Full-Flow Simulation Script
  * ═══════════════════════════════════════════════════════════════════════════
  *
- *  This script runs the complete protocol lifecycle on Hardhat's built-in chain
- *  with REAL ECDSA signature verification (ECDSANotaryVerifier).
+ *  Runs the complete protocol lifecycle on Hardhat's built-in chain with real
+ *  ECDSA notary signatures (no on-chain ZK verification; the paper's design
+ *  has the notary verify the ZK proof off-chain).
  *
- *    Step 1 — Deploy ECDSANotaryVerifier (real ECDSA verification)
- *    Step 2 — Deploy MockZKVerifier
- *    Step 3 — Deploy PPREVSingle
- *    Step 4 — Whitelist a sample policyId
- *    Step 5 — Landlord advertises a listing  (registerListing)
- *    Step 6 — Tenant applies for the listing (applyToListing)
- *    Step 7 — Landlord settles               (settleListing)
- *
- *  Prints listing/application statuses and ETH balances before & after each phase.
+ *    Step 1 — Deploy ECDSANotaryVerifier
+ *    Step 2 — Deploy PPREVSingle
+ *    Step 3 — Whitelist three policy IDs (policyId_R, policyId_A, policyId_S)
+ *    Step 4 — Prover registers a transaction (register)
+ *    Step 5 — Counterparty applies (applyTx)
+ *    Step 6 — Listing owner engages the application (engage)
+ *    Step 7 — Listing owner settles (settle)
  */
 
 import { ethers } from "hardhat";
-import { Contract, Wallet } from "ethers";
+import { Wallet } from "ethers";
 
-// ────────────────────────────────────────────────────────────────────────────
-//  Notary wallet — Anvil/Hardhat account #9
-// ────────────────────────────────────────────────────────────────────────────
-
+// Notary wallet — Anvil/Hardhat account #9 (well-known test key, not a secret)
 const NOTARY_PRIVATE_KEY =
-    "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6";
-
-// ────────────────────────────────────────────────────────────────────────────
-//  Console helpers
-// ────────────────────────────────────────────────────────────────────────────
+  "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6";
 
 const LINE = "═".repeat(65);
 const THIN = "─".repeat(65);
 
-const LISTING_STATUS_NAMES = ["NONE", "ACTIVE", "LOCKED", "SETTLED", "CANCELLED"];
-const APP_STATUS_NAMES = ["NONE", "PENDING_TRANSFER", "SETTLED", "EXPIRED"];
+const TX_STATE_NAMES = ["NONE", "ACTIVE", "LOCKED", "SETTLED", "CANCELLED"];
+const APP_STATUS_NAMES = ["NONE", "PENDING", "ENGAGED", "EXPIRED", "CANCELLED"];
+const ENG_STATUS_NAMES = ["NONE", "ACTIVE", "SETTLED", "EXPIRED"];
 
 function banner(title: string) {
-    console.log(`\n${LINE}`);
-    console.log(`  ${title}`);
-    console.log(LINE);
+  console.log(`\n${LINE}`);
+  console.log(`  ${title}`);
+  console.log(LINE);
 }
 
 function section(title: string) {
-    console.log(`\n  ${THIN}`);
-    console.log(`  ${title}`);
-    console.log(`  ${THIN}`);
+  console.log(`\n  ${THIN}`);
+  console.log(`  ${title}`);
+  console.log(`  ${THIN}`);
 }
 
 function log(key: string, value: string) {
-    console.log(`    ${key.padEnd(28)} ${value}`);
+  console.log(`    ${key.padEnd(28)} ${value}`);
 }
 
-function listingStatusName(index: number | bigint): string {
-    return LISTING_STATUS_NAMES[Number(index)] ?? `UNKNOWN(${index})`;
-}
+const txStateName = (i: number | bigint) => TX_STATE_NAMES[Number(i)] ?? `?(${i})`;
+const appStatusName = (i: number | bigint) => APP_STATUS_NAMES[Number(i)] ?? `?(${i})`;
+const engStatusName = (i: number | bigint) => ENG_STATUS_NAMES[Number(i)] ?? `?(${i})`;
 
-function appStatusName(index: number | bigint): string {
-    return APP_STATUS_NAMES[Number(index)] ?? `UNKNOWN(${index})`;
+async function balanceEth(address: string): Promise<string> {
+  const wei = await ethers.provider.getBalance(address);
+  return ethers.formatEther(wei);
 }
-
-async function getBalance(address: string): Promise<string> {
-    const wei = await ethers.provider.getBalance(address);
-    return ethers.formatEther(wei);
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-//  Signature helper — signs with the notary wallet (EIP-191)
-// ────────────────────────────────────────────────────────────────────────────
 
 const notaryWallet = new Wallet(NOTARY_PRIVATE_KEY);
 
 async function signNotary(msgHash: string): Promise<string> {
-    return await notaryWallet.signMessage(ethers.getBytes(msgHash));
+  return notaryWallet.signMessage(ethers.getBytes(msgHash));
+}
+
+async function nowTs(): Promise<bigint> {
+  const block = await ethers.provider.getBlock("latest");
+  return BigInt(block!.timestamp);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-//  Dummy ZK proof constants (mock verifier always accepts)
-// ────────────────────────────────────────────────────────────────────────────
-
-const DUMMY_ZK_PROOF = "0xdead";
-const DUMMY_ZK_INPUTS: string[] = [];          // empty public inputs
-
-// ────────────────────────────────────────────────────────────────────────────
-//  Main simulation
+//  Main
 // ────────────────────────────────────────────────────────────────────────────
 
 async function main() {
-    // ── Signers ──
-    const [admin, landlord, tenant] = await ethers.getSigners();
+  const [admin, lister, counterparty] = await ethers.getSigners();
 
-    banner("PPREV Protocol — Full-Flow Simulation (Real ECDSA)");
-    log("Admin (deployer)", admin.address);
-    log("Landlord", landlord.address);
-    log("Tenant", tenant.address);
-    log("Notary", notaryWallet.address);
+  banner("PPREV Protocol — Full-Flow Simulation (Real ECDSA Notary)");
+  log("Admin (deployer)", admin.address);
+  log("Lister (prover)", lister.address);
+  log("Counterparty", counterparty.address);
+  log("Notary", notaryWallet.address);
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Step 1 — Deploy ECDSANotaryVerifier
-    // ════════════════════════════════════════════════════════════════════════
+  // ── Step 1 — Deploy ECDSANotaryVerifier ──────────────────────────────
+  banner("Step 1 — Deploy ECDSANotaryVerifier");
+  const VerifierFactory = await ethers.getContractFactory("ECDSANotaryVerifier");
+  const verifier = await VerifierFactory.deploy(notaryWallet.address);
+  await verifier.waitForDeployment();
+  const verifierAddr = await verifier.getAddress();
+  log("Deployed at", verifierAddr);
 
-    banner("Step 1 — Deploy ECDSANotaryVerifier");
+  // ── Step 2 — Deploy PPREVSingle ──────────────────────────────────────
+  banner("Step 2 — Deploy PPREVSingle");
+  const FRESHNESS = 300; // 5 min
+  const DEFAULT_LOCK = 3600; // 1 hour
+  const MIN_COLLATERAL = ethers.parseEther("0.1");
 
-    const SigFactory = await ethers.getContractFactory("ECDSANotaryVerifier");
-    const sigVerifier = await SigFactory.deploy(notaryWallet.address);
-    await sigVerifier.waitForDeployment();
-    const sigAddr = await sigVerifier.getAddress();
-    log("Deployed at", sigAddr);
-    log("Notary address", notaryWallet.address);
+  const PPREVFactory = await ethers.getContractFactory("PPREVSingle");
+  const protocol = await PPREVFactory.deploy(
+    verifierAddr,
+    FRESHNESS,
+    DEFAULT_LOCK,
+    MIN_COLLATERAL,
+  );
+  await protocol.waitForDeployment();
+  const protocolAddr = await protocol.getAddress();
+  log("Deployed at", protocolAddr);
+  log("Freshness window", `${FRESHNESS}s`);
+  log("Default lock window", `${DEFAULT_LOCK}s`);
+  log("Min collateral", `${ethers.formatEther(MIN_COLLATERAL)} ETH`);
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Step 2 — Deploy MockZKVerifier
-    // ════════════════════════════════════════════════════════════════════════
+  const asAdmin = protocol.connect(admin) as any;
+  const asLister = protocol.connect(lister) as any;
+  const asCounterparty = protocol.connect(counterparty) as any;
 
-    banner("Step 2 — Deploy MockZKVerifier");
+  // ── Step 3 — Whitelist three policy IDs ──────────────────────────────
+  banner("Step 3 — Whitelist Policies (R / A / S)");
+  const policyIdR = ethers.keccak256(ethers.toUtf8Bytes("rental-ownership-v1"));
+  const policyIdA = ethers.keccak256(ethers.toUtf8Bytes("rental-eligibility-v1"));
+  const policyIdS = ethers.keccak256(ethers.toUtf8Bytes("rental-settlement-v1"));
+  await asAdmin.whitelistPolicy(policyIdR, true);
+  await asAdmin.whitelistPolicy(policyIdA, true);
+  await asAdmin.whitelistPolicy(policyIdS, true);
+  log("policyId_R", policyIdR);
+  log("policyId_A", policyIdA);
+  log("policyId_S", policyIdS);
 
-    const ZKFactory = await ethers.getContractFactory("MockZKVerifier");
-    const zkVerifier = await ZKFactory.deploy();
-    await zkVerifier.waitForDeployment();
-    const zkAddr = await zkVerifier.getAddress();
-    log("Deployed at", zkAddr);
+  // ── Step 4 — Register a transaction (Phase 1 / phi_R) ────────────────
+  banner("Step 4 — Register Transaction");
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Step 3 — Deploy PPREVSingle
-    // ════════════════════════════════════════════════════════════════════════
+  // Public transaction parameters (txData) — abi-encode a representative payload
+  const txData = ethers.AbiCoder.defaultAbiCoder().encode(
+    ["string", "string", "uint256", "uint256"],
+    ["rental", "PROPERTY-IST-2026-001", 1500, 12],
+  );
+  const salt = ethers.keccak256(ethers.toUtf8Bytes("salt-listing-001"));
+  const nonceR = ethers.keccak256(ethers.toUtf8Bytes("nonce-register-001"));
+  const reqEscrow = ethers.parseEther("0.05");
+  const collateral = ethers.parseEther("0.1");
 
-    banner("Step 3 — Deploy PPREVSingle");
+  // txID == C_tx = keccak256(txData || policyId_R || salt)
+  const txID = ethers.solidityPackedKeccak256(
+    ["bytes", "bytes32", "bytes32"],
+    [txData, policyIdR, salt],
+  );
+  const txDataHash = ethers.keccak256(txData);
+  const tsR = await nowTs();
 
-    const FRESHNESS_WINDOW = 300;            // 5 minutes
-    const EXPIRY_TIMEOUT = 3600;           // 1 hour
-    const MIN_COLLATERAL = ethers.parseEther("0.1");
+  // x_R = (C_tx, H(txData), policyId_R, eta_R, t_auth_R); sigma_R signs x_R || addr_SC
+  const msgR = ethers.solidityPackedKeccak256(
+    ["bytes32", "bytes32", "bytes32", "bytes32", "uint256", "address"],
+    [txID, txDataHash, policyIdR, nonceR, tsR, protocolAddr],
+  );
+  const sigmaR = await signNotary(msgR);
+  log("Notary σ_R", sigmaR.slice(0, 20) + "…");
+  log("txID (C_tx)", txID);
 
-    const PPREVFactory = await ethers.getContractFactory("PPREVSingle");
-    const protocol = await PPREVFactory.deploy(
-        zkAddr, sigAddr, FRESHNESS_WINDOW, EXPIRY_TIMEOUT, MIN_COLLATERAL,
-    );
-    await protocol.waitForDeployment();
-    const protocolAddr = await protocol.getAddress();
-    log("Deployed at", protocolAddr);
-    log("Freshness window", `${FRESHNESS_WINDOW}s`);
-    log("Expiry timeout", `${EXPIRY_TIMEOUT}s`);
-    log("Min collateral", `${ethers.formatEther(MIN_COLLATERAL)} ETH`);
+  section("Before register");
+  log("Lister balance", `${await balanceEth(lister.address)} ETH`);
+  log("Contract balance", `${await balanceEth(protocolAddr)} ETH`);
 
-    // Cast to `any` once because ethers v6 `.connect()` drops typed methods
-    const asAdmin = protocol.connect(admin) as any;
-    const asLandlord = protocol.connect(landlord) as any;
-    const asTenant = protocol.connect(tenant) as any;
+  const txReg = await asLister.register(
+    txData,
+    policyIdR,
+    policyIdA,
+    policyIdS,
+    salt,
+    reqEscrow,
+    nonceR,
+    tsR,
+    sigmaR,
+    { value: collateral },
+  );
+  await txReg.wait();
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Step 4 — Whitelist a sample policyId
-    // ════════════════════════════════════════════════════════════════════════
+  section("After register");
+  const l1 = await asAdmin.getListing(txID);
+  log("Listing state", txStateName(l1.state));
+  log("Listing owner", l1.owner);
+  log("Collateral", `${ethers.formatEther(l1.collateral)} ETH`);
+  log("Required escrow", `${ethers.formatEther(l1.reqEscrow)} ETH`);
+  log("Lister balance", `${await balanceEth(lister.address)} ETH`);
+  log("Contract balance", `${await balanceEth(protocolAddr)} ETH`);
 
-    banner("Step 4 — Whitelist Policy");
+  // ── Step 5 — Counterparty applies (Phase 2 / phi_A) ──────────────────
+  banner("Step 5 — Counterparty Applies");
+  const nonceA = ethers.keccak256(ethers.toUtf8Bytes("nonce-apply-001"));
+  const tsA = await nowTs();
 
-    const policyId = ethers.keccak256(ethers.toUtf8Bytes("rental-policy-v1"));
-    await asAdmin.whitelistPolicy(policyId, true);
-    log("Policy ID", policyId);
-    log("Whitelisted", "✓");
+  // x_A = (txID, policyId_A, eta_A, t_auth_A); sigma_A signs x_A || addr_SC
+  const msgA = ethers.solidityPackedKeccak256(
+    ["bytes32", "bytes32", "bytes32", "uint256", "address"],
+    [txID, policyIdA, nonceA, tsA, protocolAddr],
+  );
+  const sigmaA = await signNotary(msgA);
+  log("Notary σ_A", sigmaA.slice(0, 20) + "…");
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Step 5 — Landlord advertises a listing (registerListing)
-    // ════════════════════════════════════════════════════════════════════════
+  // Predict appId (mirrors contract derivation)
+  const appId = ethers.solidityPackedKeccak256(
+    ["bytes32", "address", "bytes32"],
+    [txID, counterparty.address, nonceA],
+  );
 
-    banner("Step 5 — Landlord Advertises Listing");
+  section("Before applyTx");
+  log("Counterparty balance", `${await balanceEth(counterparty.address)} ETH`);
+  log("Contract balance", `${await balanceEth(protocolAddr)} ETH`);
 
-    const adHash = ethers.keccak256(ethers.toUtf8Bytes("2br-apartment-istanbul-2024"));
-    const reqEscrow = ethers.parseEther("0.05");
-    const transcriptListing = ethers.keccak256(ethers.toUtf8Bytes("landlord-credential-transcript"));
-    const nonceListing = ethers.keccak256(ethers.toUtf8Bytes("nonce-landlord-listing-001"));
-    const block1 = await ethers.provider.getBlock("latest");
-    const timestampListing = block1!.timestamp;
-    const collateral = ethers.parseEther("0.1");
+  const txApply = await asCounterparty.applyTx(txID, nonceA, tsA, sigmaA, {
+    value: reqEscrow,
+  });
+  await txApply.wait();
 
-    // ── Compute real notary signature ──
-    const sigMessageListing = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bytes32", "bytes32", "uint256", "bytes32"],
-        [landlord.address, adHash, policyId, transcriptListing, timestampListing, nonceListing],
-    );
-    const thresholdSigListing = await signNotary(sigMessageListing);
-    log("Notary signature", thresholdSigListing.slice(0, 20) + "…");
+  section("After applyTx");
+  const app1 = await asAdmin.getApplication(appId);
+  const l2 = await asAdmin.getListing(txID);
+  log("Application status", appStatusName(app1.status));
+  log("Listing state", txStateName(l2.state));
+  log("appId", appId);
+  log("Applicant", app1.applicant);
+  log("Escrow", `${ethers.formatEther(app1.escrow)} ETH`);
+  log("Counterparty balance", `${await balanceEth(counterparty.address)} ETH`);
+  log("Contract balance", `${await balanceEth(protocolAddr)} ETH`);
 
-    // ── Before ──
-    section("Before registerListing");
-    const listingBefore = await (protocol as any).getListing(adHash);
-    log("Listing status", listingStatusName(listingBefore.status));
-    log("Landlord balance", `${await getBalance(landlord.address)} ETH`);
-    log("Contract balance", `${await getBalance(protocolAddr)} ETH`);
+  // ── Step 6 — Listing owner engages (Phase 2 engagement) ──────────────
+  banner("Step 6 — Listing Owner Engages");
+  const txEngage = await asLister.engage(appId, 0); // 0 = use default lock window
+  const rcEngage = await txEngage.wait();
 
-    // ── Execute ──
-    const txReg = await asLandlord.registerListing(
-        adHash,
-        policyId,
-        reqEscrow,
-        transcriptListing,
-        timestampListing,
-        nonceListing,
-        DUMMY_ZK_PROOF,
-        DUMMY_ZK_INPUTS,
-        thresholdSigListing,
-        { value: collateral },
-    );
-    await txReg.wait();
-
-    // ── After ──
-    section("After registerListing");
-    const listingAfterReg = await (protocol as any).getListing(adHash);
-    log("Listing status", listingStatusName(listingAfterReg.status));
-    log("Listing owner", listingAfterReg.owner);
-    log("Collateral locked", `${ethers.formatEther(listingAfterReg.collateral)} ETH`);
-    log("Required escrow", `${ethers.formatEther(listingAfterReg.reqEscrow)} ETH`);
-    log("Landlord balance", `${await getBalance(landlord.address)} ETH`);
-    log("Contract balance", `${await getBalance(protocolAddr)} ETH`);
-
-    // ════════════════════════════════════════════════════════════════════════
-    //  Step 6 — Tenant applies for the listing (applyToListing)
-    // ════════════════════════════════════════════════════════════════════════
-
-    banner("Step 6 — Tenant Applies for Listing");
-
-    const transcriptTenant = ethers.keccak256(ethers.toUtf8Bytes("tenant-credential-transcript"));
-    const nonceApply = ethers.keccak256(ethers.toUtf8Bytes("nonce-tenant-apply-001"));
-    const block2 = await ethers.provider.getBlock("latest");
-    const timestampApply = block2!.timestamp;
-
-    // Derive appId off-chain (same formula as the contract)
-    const appId = ethers.keccak256(
-        ethers.solidityPacked(
-            ["bytes32", "address", "bytes32"],
-            [adHash, tenant.address, nonceApply],
-        ),
-    );
-
-    // ── Compute real notary signature ──
-    const sigMessageApply = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bytes32", "bytes32", "uint256", "bytes32"],
-        [tenant.address, adHash, policyId, transcriptTenant, timestampApply, nonceApply],
-    );
-    const thresholdSigApply = await signNotary(sigMessageApply);
-    log("Notary signature", thresholdSigApply.slice(0, 20) + "…");
-
-    // ── Before ──
-    section("Before applyToListing");
-    const listingBeforeApply = await (protocol as any).getListing(adHash);
-    log("Listing status", listingStatusName(listingBeforeApply.status));
-    log("Tenant balance", `${await getBalance(tenant.address)} ETH`);
-    log("Contract balance", `${await getBalance(protocolAddr)} ETH`);
-
-    // ── Execute ──
-    const txApply = await asTenant.applyToListing(
-        adHash,
-        policyId,
-        transcriptTenant,
-        timestampApply,
-        nonceApply,
-        DUMMY_ZK_PROOF,
-        DUMMY_ZK_INPUTS,
-        thresholdSigApply,
-        { value: reqEscrow },
-    );
-    const rcApply = await txApply.wait();
-
-    // ── After ──
-    section("After applyToListing");
-    const listingAfterApply = await (protocol as any).getListing(adHash);
-    const appAfterApply = await (protocol as any).getApplication(appId);
-    log("Listing status", listingStatusName(listingAfterApply.status));
-    log("Application status", appStatusName(appAfterApply.status));
-    log("Emitted appId", appId);
-    log("Applicant", appAfterApply.applicant);
-    log("Escrow locked", `${ethers.formatEther(appAfterApply.escrowAmount)} ETH`);
-    log("Tenant balance", `${await getBalance(tenant.address)} ETH`);
-    log("Contract balance", `${await getBalance(protocolAddr)} ETH`);
-
-    // Also try to extract appId from the ApplicationCreated event log
-    const appCreatedTopic = protocol.interface.getEvent("ApplicationCreated");
-    if (appCreatedTopic && rcApply.logs) {
-        for (const logEntry of rcApply.logs) {
-            try {
-                const parsed = protocol.interface.parseLog({
-                    topics: logEntry.topics as string[],
-                    data: logEntry.data,
-                });
-                if (parsed && parsed.name === "ApplicationCreated") {
-                    log("Event appId", parsed.args[0]);
-                    log("Event escrow", `${ethers.formatEther(parsed.args[3])} ETH`);
-                }
-            } catch { /* skip non-matching logs */ }
-        }
+  // Extract engId from the Engaged event (engId = engagement identifier)
+  let engId = "0x";
+  for (const logEntry of rcEngage.logs) {
+    try {
+      const parsed = protocol.interface.parseLog({
+        topics: logEntry.topics as string[],
+        data: logEntry.data,
+      });
+      if (parsed && parsed.name === "Engaged") {
+        engId = parsed.args[0] as string;
+        break;
+      }
+    } catch {
+      /* skip non-matching logs */
     }
+  }
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Step 7 — Landlord settles (settleListing)
-    // ════════════════════════════════════════════════════════════════════════
+  section("After engage");
+  const eng1 = await asAdmin.getEngagement(engId);
+  const l3 = await asAdmin.getListing(txID);
+  const app2 = await asAdmin.getApplication(appId);
+  log("Engagement status", engStatusName(eng1.status));
+  log("Listing state", txStateName(l3.state));
+  log("Application status", appStatusName(app2.status));
+  log("engId", engId);
+  log("expiresAt", `${eng1.expiresAt} (in ${Number(eng1.expiresAt) - Number(await nowTs())}s)`);
 
-    banner("Step 7 — Landlord Settles");
+  // ── Step 7 — Listing owner settles (Phase 3 / phi_S) ─────────────────
+  banner("Step 7 — Listing Owner Settles");
+  const nonceS = ethers.keccak256(ethers.toUtf8Bytes("nonce-settle-001"));
+  const tsS = await nowTs();
 
-    const transcriptSettle = ethers.keccak256(ethers.toUtf8Bytes("settlement-transcript"));
-    const nonceSettle = ethers.keccak256(ethers.toUtf8Bytes("nonce-landlord-settle-001"));
-    const block3 = await ethers.provider.getBlock("latest");
-    const timestampSettle = block3!.timestamp;
+  // x_S = (engId, txID, policyId_S, eta_S, t_auth_S); sigma_S signs x_S || addr_SC
+  const msgS = ethers.solidityPackedKeccak256(
+    ["bytes32", "bytes32", "bytes32", "bytes32", "uint256", "address"],
+    [engId, txID, policyIdS, nonceS, tsS, protocolAddr],
+  );
+  const sigmaS = await signNotary(msgS);
+  log("Notary σ_S", sigmaS.slice(0, 20) + "…");
 
-    // ── Compute real notary signature ──
-    const sigMessageSettle = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bytes32", "uint256", "bytes32"],
-        [landlord.address, appId, transcriptSettle, timestampSettle, nonceSettle],
-    );
-    const thresholdSigSettle = await signNotary(sigMessageSettle);
-    log("Notary signature", thresholdSigSettle.slice(0, 20) + "…");
+  section("Before settle");
+  log("Lister balance", `${await balanceEth(lister.address)} ETH`);
+  log("Counterparty balance", `${await balanceEth(counterparty.address)} ETH`);
+  log("Contract balance", `${await balanceEth(protocolAddr)} ETH`);
 
-    // ── Before ──
-    section("Before settleListing");
-    const listingBeforeSettle = await (protocol as any).getListing(adHash);
-    const appBeforeSettle = await (protocol as any).getApplication(appId);
-    log("Listing status", listingStatusName(listingBeforeSettle.status));
-    log("Application status", appStatusName(appBeforeSettle.status));
-    log("Landlord balance", `${await getBalance(landlord.address)} ETH`);
-    log("Contract balance", `${await getBalance(protocolAddr)} ETH`);
+  const txSettle = await asLister.settle(engId, nonceS, tsS, sigmaS);
+  await txSettle.wait();
 
-    // ── Execute ──
-    const txSettle = await asLandlord.settleListing(
-        appId,
-        transcriptSettle,
-        timestampSettle,
-        nonceSettle,
-        DUMMY_ZK_PROOF,
-        DUMMY_ZK_INPUTS,
-        thresholdSigSettle,
-    );
-    await txSettle.wait();
+  section("After settle");
+  const l4 = await asAdmin.getListing(txID);
+  const eng2 = await asAdmin.getEngagement(engId);
+  log("Listing state", txStateName(l4.state));
+  log("Engagement status", engStatusName(eng2.status));
+  log("Lister balance", `${await balanceEth(lister.address)} ETH`);
+  log("Counterparty balance", `${await balanceEth(counterparty.address)} ETH`);
+  log("Contract balance", `${await balanceEth(protocolAddr)} ETH`);
 
-    // ── After ──
-    section("After settleListing");
-    const listingAfterSettle = await (protocol as any).getListing(adHash);
-    const appAfterSettle = await (protocol as any).getApplication(appId);
-    log("Listing status", listingStatusName(listingAfterSettle.status));
-    log("Application status", appStatusName(appAfterSettle.status));
-    log("Landlord balance", `${await getBalance(landlord.address)} ETH`);
-    log("Tenant balance", `${await getBalance(tenant.address)} ETH`);
-    log("Contract balance", `${await getBalance(protocolAddr)} ETH`);
-
-    // ════════════════════════════════════════════════════════════════════════
-    //  Summary
-    // ════════════════════════════════════════════════════════════════════════
-
-    banner("✅  Simulation Complete — Summary");
-    console.log();
-    console.log("    Listing   : ACTIVE → LOCKED → SETTLED");
-    console.log("    Application: (none) → PENDING_TRANSFER → SETTLED");
-    console.log();
-    console.log("    Verification pipeline:");
-    console.log("      • Real ECDSA signatures from Notary (ecrecover on-chain)");
-    console.log("      • Mock ZK proofs (always-pass stub)");
-    console.log();
-    console.log("    Funds flow:");
-    console.log("      • Landlord deposited 0.1 ETH collateral");
-    console.log("      • Tenant deposited 0.05 ETH escrow");
-    console.log("      • On settlement, landlord received escrow + collateral back");
-    console.log("      • Contract balance returned to 0 ETH");
-    console.log();
+  // ── Summary ──────────────────────────────────────────────────────────
+  banner("✅  Simulation Complete — Summary");
+  console.log();
+  console.log("    Listing      : ACTIVE → LOCKED → SETTLED");
+  console.log("    Application  : (none) → PENDING → ENGAGED");
+  console.log("    Engagement   : (none) → ACTIVE → SETTLED");
+  console.log();
+  console.log("    Notary signatures: σ_R, σ_A, σ_S (real ECDSA, ecrecover on-chain)");
+  console.log("    ZK proofs are verified off-chain by the notary (not on-chain).");
+  console.log();
 }
 
 main().catch((error) => {
-    console.error(error);
-    process.exitCode = 1;
+  console.error(error);
+  process.exitCode = 1;
 });

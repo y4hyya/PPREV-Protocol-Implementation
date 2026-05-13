@@ -1,2146 +1,505 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PPREV — Privacy-Preserving Real Estate</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="theme.css">
-<link rel="stylesheet" href="layout.css">
-<link rel="stylesheet" href="components.css">
-<link rel="stylesheet" href="components2.css">
-</head>
-<body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>PPREV — Privacy-Preserving Real Estate Verification</title>
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="layout.css" />
+    <link rel="stylesheet" href="components.css" />
+    <link rel="stylesheet" href="components2.css" />
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"></script>
+    <style>
+      :root {
+        --c-bg: #0f1116;
+        --c-card: #161922;
+        --c-card2: #1c2030;
+        --c-border: #2a2e3d;
+        --c-txt: #e6e8ee;
+        --c-txt2: #aab0bf;
+        --c-txt3: #7a8092;
+        --c-accent: #6366f1;
+        --c-green: #10b981;
+        --c-amber: #f59e0b;
+        --c-red: #ef4444;
+        --radius: 8px;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--c-bg); color: var(--c-txt);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+      header { padding: 16px 28px; border-bottom: 1px solid var(--c-border);
+        display: flex; justify-content: space-between; align-items: center;
+        background: var(--c-card); }
+      header h1 { font-size: 1.1rem; margin: 0; }
+      header .meta { font-size: 0.78rem; color: var(--c-txt3); }
+      main { max-width: 1100px; margin: 28px auto; padding: 0 24px;
+        display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+      .card { background: var(--c-card); border: 1px solid var(--c-border);
+        border-radius: var(--radius); padding: 20px; }
+      .card h2 { margin: 0 0 16px; font-size: 1rem; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--c-txt2); }
+      .row { display: flex; gap: 8px; margin-bottom: 8px; }
+      .row label { flex: 0 0 140px; font-size: 0.85rem;
+        color: var(--c-txt2); align-self: center; }
+      .row input, .row select, .row textarea { flex: 1; background: var(--c-card2);
+        border: 1px solid var(--c-border); color: var(--c-txt);
+        padding: 8px 10px; font-family: inherit; font-size: 0.85rem; border-radius: 4px; }
+      .row textarea { resize: vertical; min-height: 60px; }
+      .btn { background: var(--c-accent); color: white; border: 0;
+        padding: 9px 16px; font-size: 0.85rem; border-radius: 4px;
+        cursor: pointer; margin: 6px 6px 0 0; }
+      .btn:hover { opacity: 0.9; }
+      .btn-secondary { background: var(--c-card2);
+        border: 1px solid var(--c-border); color: var(--c-txt); }
+      .btn-green { background: var(--c-green); }
+      .btn-amber { background: var(--c-amber); }
+      .btn-red { background: var(--c-red); }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 12px;
+        font-size: 0.72rem; font-weight: 600;
+        background: var(--c-card2); border: 1px solid var(--c-border); }
+      .b-active { background: rgba(16,185,129,0.15); color: #34d399; border-color: #065f46; }
+      .b-locked { background: rgba(245,158,11,0.15); color: #fbbf24; border-color: #92400e; }
+      .b-settled { background: rgba(99,102,241,0.15); color: #a5b4fc; border-color: #4338ca; }
+      .b-cancelled { background: rgba(239,68,68,0.15); color: #fca5a5; border-color: #b91c1c; }
+      pre.log { background: #0a0c12; border: 1px solid var(--c-border);
+        border-radius: 4px; padding: 10px;
+        font-family: "SF Mono", Monaco, monospace; font-size: 0.72rem;
+        max-height: 280px; overflow: auto; margin: 0; white-space: pre-wrap; }
+      .full { grid-column: 1 / -1; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+      th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--c-border); }
+      th { color: var(--c-txt3); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; }
+      .mono { font-family: "SF Mono", Monaco, monospace; font-size: 0.78rem; }
+      .truncate { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .stat { display: flex; justify-content: space-between; padding: 4px 0;
+        border-bottom: 1px dashed var(--c-border); font-size: 0.85rem; }
+      .stat:last-child { border: 0; }
+      .stat .k { color: var(--c-txt3); }
+      .stat .v { font-family: "SF Mono", Monaco, monospace; font-size: 0.78rem; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>PPREV
+        <span style="color: var(--c-txt3); font-weight: normal">
+          — Privacy-Preserving Real Estate Verification (demo UI)</span>
+      </h1>
+      <div class="meta" id="hdr-meta">Not connected</div>
+    </header>
 
-<!-- ══════════ NAV ══════════ -->
-<nav class="nav">
-  <div class="nav-logo">
-    <div class="logo-mark">PP</div>
-    PPREV
-  </div>
-  <div class="nav-center">
-    <button class="nav-link active" data-nav="home"     onclick="navigate('home')">Home</button>
-    <button class="nav-link"        data-nav="listings" onclick="navigate('listings')">Listings</button>
-    <button class="nav-link"        data-nav="dashboard" onclick="navigate('dashboard')">Dashboard</button>
-    <button class="nav-link"        data-nav="visualizer" onclick="navigate('visualizer')">Protocol</button>
-    <button class="nav-link"        onclick="showModal()">How to Use</button>
-  </div>
-  <div class="nav-right">
-    <div class="role-pill">
-      <button id="rbtn-ll" onclick="switchRole('landlord')">Landlord</button>
-      <button id="rbtn-tn" onclick="switchRole('tenant')">Tenant</button>
-    </div>
-    <button id="edevlet-btn" class="hidden edevlet-nav-btn" onclick="openEdevletModal()">
-      🇹🇷 <span>E-Devlet Doğrula</span>
-    </button>
-    <div id="edevlet-verified-badge" class="hidden edevlet-verified-badge">
-      <span>🇹🇷</span><span id="edevlet-verified-name"></span>
-    </div>
-    <div class="wallet-chip" onclick="toggleWallet()">
-      <span class="wallet-dot" id="w-dot"></span>
-      <span id="w-addr">Connect</span>
-      <span class="wallet-bal" id="w-bal"></span>
-    </div>
-  </div>
-</nav>
-
-<main class="main">
-  <div class="toast-wrap" id="toasts"></div>
-
-  <!-- ══════════ ONBOARDING MODAL ══════════ -->
-  <div class="modal-bg hidden" id="modal-bg" onclick="handleModalBg(event)">
-    <div class="modal">
-      <div class="modal-head">
-        <h2>How to Use PPREV</h2>
-        <p>Privacy-preserving real estate on Ethereum. Select your role for a step-by-step guide.</p>
-        <div class="modal-tabs-row">
-          <button class="modal-tab active" id="mtab-ll" onclick="switchModalTab('ll')">🏠 Landlord / Seller</button>
-          <button class="modal-tab"        id="mtab-tn" onclick="switchModalTab('tn')">👤 Tenant / Buyer</button>
+    <main>
+      <!-- Connection -->
+      <div class="card">
+        <h2>Connection</h2>
+        <div class="row"><label>Notary base URL</label>
+          <input id="notaryUrl" value="http://localhost:3001" /></div>
+        <div class="row"><label>Contract address</label>
+          <input id="contractAddr" placeholder="Loaded from deployed-addresses.json" /></div>
+        <button class="btn btn-secondary" onclick="loadDeployedAddresses()">↻ Load addresses</button>
+        <button class="btn btn-green" onclick="connectWallet()">Connect MetaMask</button>
+        <div style="margin-top: 12px">
+          <div class="stat"><span class="k">Account</span><span class="v" id="s-account">—</span></div>
+          <div class="stat"><span class="k">Chain ID</span><span class="v" id="s-chain">—</span></div>
+          <div class="stat"><span class="k">Notary address</span><span class="v" id="s-notary">—</span></div>
+          <div class="stat"><span class="k">Default lock window</span><span class="v" id="s-lock">—</span></div>
+          <div class="stat"><span class="k">Freshness window</span><span class="v" id="s-fresh">—</span></div>
+          <div class="stat"><span class="k">Min collateral</span><span class="v" id="s-mincol">—</span></div>
         </div>
       </div>
-      <div class="modal-body">
-        <div class="ob-list" id="ob-ll">
-          <div class="ob-item"><div class="ob-num-circle ll">1</div><div><h4>Connect MetaMask</h4><p>Click Connect in the top-right. Switch to Hardhat Local (Chain ID: 31337). Your E-Devlet identity is detected automatically.</p><span class="ob-tag ll">Navbar → Connect</span></div></div>
-          <div class="ob-item"><div class="ob-num-circle ll">2</div><div><h4>Create a Listing</h4><p>Go to Dashboard → Create Listing. Fill in property address, price, and bond amount. Choose Rent or Sale.</p><span class="ob-tag ll">Dashboard → Create Listing</span></div></div>
-          <div class="ob-item"><div class="ob-num-circle ll">3</div><div><h4>Notary Ownership Attestation</h4><p>The Notary Network verifies your E-Devlet ownership and issues an ECDSA signature. No personal data goes on-chain.</p><span class="ob-tag ll">Automatic · E-Devlet ✓ → ECDSA Sig</span></div></div>
-          <div class="ob-item"><div class="ob-num-circle ll">4</div><div><h4>Submit On-Chain</h4><p>MetaMask signs the transaction. Collateral is locked. Listing becomes ACTIVE and visible to tenants.</p><span class="ob-tag ll">registerListing() · Status: ACTIVE</span></div></div>
-          <div class="ob-item"><div class="ob-num-circle ll">5</div><div><h4>Settle After Handover</h4><p>After handing over the keys, click Settle. Escrow + collateral are released to you. ⚠ Settle before deadline or 10% is slashed.</p><span class="ob-tag ll">settleListing() · Funds released</span></div></div>
-        </div>
-        <div class="ob-list hidden" id="ob-tn">
-          <div class="ob-item"><div class="ob-num-circle tn">1</div><div><h4>Connect MetaMask</h4><p>Connect your wallet. The system detects you as a tenant via E-Devlet and switches your role automatically.</p><span class="ob-tag tn">Navbar → Connect</span></div></div>
-          <div class="ob-item"><div class="ob-num-circle tn">2</div><div><h4>Browse Active Listings</h4><p>Go to Listings to see all active properties. Filter by type and status. Click Apply Now on any listing.</p><span class="ob-tag tn">Listings → Apply Now</span></div></div>
-          <div class="ob-item"><div class="ob-num-circle tn">3</div><div><h4>Income Eligibility Check</h4><p>The Notary fetches your income from E-Devlet/SGK and verifies income ≥ threshold. Your actual income never appears on-chain.</p><span class="ob-tag tn">Privacy preserved · Predicate only</span></div></div>
-          <div class="ob-item"><div class="ob-num-circle tn">4</div><div><h4>Submit Application + Escrow</h4><p>MetaMask sends your application with notary attestation and escrow deposit atomically. Listing becomes LOCKED for you.</p><span class="ob-tag tn">applyToListing() · Escrow locked</span></div></div>
-          <div class="ob-item"><div class="ob-num-circle tn">5</div><div><h4>Slashing Protection</h4><p>If the landlord doesn't settle before deadline, call Expire. You get your escrow back plus 10% of their collateral as penalty.</p><span class="ob-tag tn">expireApplication() · +10% slash</span></div></div>
-        </div>
-      </div>
-      <div class="modal-foot">
-        <span class="modal-skip" onclick="closeModal()">Skip — I know what I'm doing</span>
-        <button class="btn btn-primary" onclick="closeModal();navigate('dashboard')">Get Started →</button>
-      </div>
-    </div>
-  </div>
 
-  <!-- ══════════ E-DEVLET KAYIT MODALI ══════════ -->
-  <div class="modal-bg hidden" id="edevlet-modal-bg">
-    <div class="modal" style="max-width:540px">
-      <div class="modal-head" style="padding-bottom:20px">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
-          <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c-indigo2),var(--c-violet));display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0">🇹🇷</div>
-          <div>
-            <h2 style="font-size:1.2rem;margin:0">E-Devlet Kimlik Doğrulama</h2>
-            <p style="font-size:.8rem;color:var(--c-txt3);margin:2px 0 0">Bu cüzdan E-Devlet'te kayıtlı değil</p>
-          </div>
-        </div>
-        <p style="font-size:.875rem;color:var(--c-txt2);line-height:1.6;padding:12px 16px;background:rgba(91,99,240,0.06);border:1px solid rgba(91,99,240,0.15);border-radius:10px">
-          PPREV protokolünü kullanmak için kimliğinizi E-Devlet simülasyonu üzerinden doğrulamanız gerekiyor. Kişisel verileriniz asla zincire yazılmaz.
+      <!-- Phase 1: Register -->
+      <div class="card">
+        <h2>1 · Register transaction (φ_R)</h2>
+        <p style="color: var(--c-txt2); font-size: 0.82rem; margin: 0 0 12px">
+          Lister submits transaction parameters and a notary attestation.
+          The contract computes C<sub>tx</sub>=H(txData ‖ policyId_R ‖ salt) and uses it as the txID.
         </p>
-      </div>
-      <div class="modal-body" style="padding-top:0">
-        <form id="edevlet-form" onsubmit="submitEdevletRegistration(event)">
-
-          <!-- Role seçimi -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">
-            <label id="edev-role-ll" class="edev-role-card edev-role-card-selected" onclick="selectEdevRole('landlord')">
-              <input type="radio" name="edev_role" value="landlord" checked style="display:none">
-              <span style="font-size:1.5rem">🏠</span>
-              <span style="font-weight:700;font-size:.9rem">Ev Sahibi</span>
-              <span style="font-size:.75rem;color:var(--c-txt3)">Mülk Kayıt</span>
-            </label>
-            <label id="edev-role-tn" class="edev-role-card" onclick="selectEdevRole('tenant')">
-              <input type="radio" name="edev_role" value="tenant" style="display:none">
-              <span style="font-size:1.5rem">👤</span>
-              <span style="font-weight:700;font-size:.9rem">Kiracı / Alıcı</span>
-              <span style="font-size:.75rem;color:var(--c-txt3)">Gelir Doğrulama</span>
-            </label>
-          </div>
-
-          <!-- Ortak alanlar -->
-          <div class="form-grid" style="margin-bottom:16px">
-            <div class="form-group">
-              <label class="form-label">Ad Soyad</label>
-              <input type="text" id="edev-ad" placeholder="Ahmet Yılmaz" required>
-            </div>
-            <div class="form-group">
-              <label class="form-label">TC Kimlik No</label>
-              <input type="text" id="edev-tc" placeholder="12345678901" maxlength="11" pattern="\d{11}" required>
-            </div>
-          </div>
-
-          <!-- Ev Sahibi alanları -->
-          <div id="edev-landlord-fields">
-            <div style="font-size:.75rem;font-weight:800;font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;color:var(--c-indigo);margin-bottom:10px">Tapu Bilgileri</div>
-            <div class="form-grid" style="margin-bottom:12px">
-              <div class="form-group">
-                <label class="form-label">Tapu No</label>
-                <input type="text" id="edev-tapu" placeholder="IST-2024-001">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Mülk Tipi</label>
-                <select id="edev-tip">
-                  <option value="rent">Kiralık</option>
-                  <option value="sale">Satılık</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-group" style="margin-bottom:12px">
-              <label class="form-label">Mülk Adresi</label>
-              <input type="text" id="edev-adres" placeholder="Kadıköy, İstanbul">
-            </div>
-            <div class="form-group" style="margin-bottom:16px">
-              <label class="form-label">Metrekare (m²)</label>
-              <input type="number" id="edev-m2" placeholder="85" min="10" max="5000">
-            </div>
-          </div>
-
-          <!-- Kiracı alanları -->
-          <div id="edev-tenant-fields" class="hidden">
-            <div style="font-size:.75rem;font-weight:800;font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;color:var(--c-indigo);margin-bottom:10px">SGK / Gelir Bilgileri</div>
-            <div class="form-grid" style="margin-bottom:12px">
-              <div class="form-group">
-                <label class="form-label">Aylık Net Gelir (TRY)</label>
-                <input type="number" id="edev-gelir" placeholder="25000" min="0">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Kredi Skoru (0–1900)</label>
-                <input type="number" id="edev-kredi" placeholder="750" min="0" max="1900">
-              </div>
-            </div>
-            <div style="font-size:.8rem;color:var(--c-txt3);padding:10px 14px;background:rgba(45,212,168,0.04);border:1px solid rgba(45,212,168,0.12);border-radius:8px;line-height:1.5">
-              Gelir ve kredi skoru bilgileriniz yalnızca uygunluk doğrulaması için kullanılır. Zincire yalnızca "yeterli / yetersiz" bilgisi yazılır.
-            </div>
-          </div>
-
-          <div id="edev-error" style="display:none;margin-top:12px;padding:10px 14px;background:var(--c-red2);border:1px solid rgba(239,107,107,0.25);border-radius:8px;font-size:.85rem;color:var(--c-red)"></div>
-        </form>
-      </div>
-      <div class="modal-foot">
-        <span class="modal-skip" onclick="closeEdevletModal()">Vazgeç</span>
-        <button class="btn btn-primary" onclick="submitEdevletRegistration(event)" id="edev-submit-btn">
-          <span id="edev-submit-txt">E-Devlet'e Kaydet →</span>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══════════ PAGE: HOME ══════════ -->
-  <div class="page active" id="page-home">
-
-    <!-- Hero -->
-    <div class="hero">
-      <div class="hero-glow"></div>
-      <div class="hero-orb1"></div>
-      <div class="hero-orb2"></div>
-      <div class="hero-orb3"></div>
-      <div class="hero-grid"></div>
-      <h1>Privacy-Preserving<br>Real Estate Verification</h1>
-      <div class="hero-eyebrow"><span class="dot"></span> Protocol v1.0 · Testnet Live · 30/30 Tests Passing</div>
-      <p class="hero-sub">Verify property ownership and income eligibility via ECDSA-attested E-Devlet records — with on-chain escrow, slashing protection, and zero PII exposed.</p>
-      <div class="hero-ctas">
-        <button class="btn btn-green btn-lg"   onclick="switchRole('landlord');navigate('dashboard')">🏠 I'm a Landlord</button>
-        <button class="btn btn-primary btn-lg" onclick="switchRole('tenant');navigate('listings')">👤 I'm a Tenant</button>
-        <button class="btn btn-ghost btn-lg"   onclick="showModal()">ℹ How It Works</button>
-      </div>
-      <div class="hero-stats">
-        <div class="hero-stat"><div class="val" style="color:var(--c-green)">ECDSA</div><div class="lbl">Real Verification</div></div>
-        <div class="hero-stat"><div class="val" style="color:var(--c-indigo)">10%</div><div class="lbl">Slashing on Delay</div></div>
-        <div class="hero-stat"><div class="val" style="color:var(--c-amber)">0 PII</div><div class="lbl">On-Chain Data</div></div>
-        <div class="hero-stat"><div class="val" style="color:var(--c-violet)">E-Devlet</div><div class="lbl">Identity Source</div></div>
-      </div>
-    </div>
-
-    <!-- How it Works Flow -->
-    <div class="flow-section">
-      <div style="max-width:1160px;margin:0 auto">
-        <div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:36px">
-          <div>
-            <div class="section-label">Step-by-Step Guide</div>
-            <div class="section-title">How the Protocol Works</div>
-            <p class="section-sub">Click each step to see technical details. Switch between roles to see the full picture.</p>
-          </div>
-          <div class="flow-role-tabs">
-            <button class="flow-role-tab ll" id="frtab-ll" onclick="switchFlowRole('ll')">🏠 Landlord</button>
-            <button class="flow-role-tab"    id="frtab-tn" onclick="switchFlowRole('tn')">👤 Tenant</button>
-          </div>
-        </div>
-
-        <div id="fr-ll" class="flow-steps">
-          <div class="flow-step" onclick="toggleStep(this,'ll')">
-            <div class="flow-step-icon">🔗</div>
-            <div class="flow-step-body">
-              <div class="flow-step-head"><span class="flow-step-title">Connect &amp; Identity Verification</span><span class="flow-step-arrow">›</span></div>
-              <div class="flow-step-desc">Connect MetaMask. The Notary Network queries E-Devlet to confirm you're a registered property owner.</div>
-              <div class="flow-step-detail"><div class="flow-step-chips"><span class="chip">MetaMask BrowserProvider</span><span class="chip">GET /notary/edevlet/:address</span><span class="chip">Auto role detection</span></div></div>
-            </div>
-          </div>
-          <div class="flow-step" onclick="toggleStep(this,'ll')">
-            <div class="flow-step-icon">📝</div>
-            <div class="flow-step-body">
-              <div class="flow-step-head"><span class="flow-step-title">Create Listing Form</span><span class="flow-step-arrow">›</span></div>
-              <div class="flow-step-desc">Enter property metadata. The Ad_Hash is computed as keccak256(metadata) — any change invalidates the listing and prevents bait-and-switch fraud.</div>
-              <div class="flow-step-detail"><div class="flow-step-chips"><span class="chip">adHash = keccak256(address+type+desc+nonce)</span><span class="chip">Policy: OWN_RENT_V1</span><span class="chip">Collateral: min 0.1 ETH</span></div></div>
-            </div>
-          </div>
-          <div class="flow-step" onclick="toggleStep(this,'ll')">
-            <div class="flow-step-icon">🔐</div>
-            <div class="flow-step-body">
-              <div class="flow-step-head"><span class="flow-step-title">Notary Ownership Attestation</span><span class="flow-step-arrow">›</span></div>
-              <div class="flow-step-desc">The Notary verifies your E-Devlet record and signs the binding tuple. This is your cryptographic proof of ownership — no PII goes on-chain.</div>
-              <div class="flow-step-detail"><div class="flow-step-chips"><span class="chip">POST /notary/attest-listing</span><span class="chip">m = keccak256(adHash‖policyId‖C_T‖t‖nonce)</span><span class="chip">σ = notaryWallet.signMessage(m)</span></div></div>
-            </div>
-          </div>
-          <div class="flow-step" onclick="toggleStep(this,'ll')">
-            <div class="flow-step-icon">⛓</div>
-            <div class="flow-step-body">
-              <div class="flow-step-head"><span class="flow-step-title">On-Chain Registration</span><span class="flow-step-arrow">›</span></div>
-              <div class="flow-step-desc">The smart contract runs ecrecover on your signature, checks nonce uniqueness and freshness window, locks your collateral. Listing → ACTIVE.</div>
-              <div class="flow-step-detail"><div class="flow-step-chips"><span class="chip">ecrecover(ethHash(m), σ) == notaryAddress</span><span class="chip">Freshness: now − t ≤ 5min</span><span class="chip">Collateral locked on-chain</span></div></div>
-            </div>
-          </div>
-          <div class="flow-step" onclick="toggleStep(this,'ll')">
-            <div class="flow-step-icon">✅</div>
-            <div class="flow-step-body">
-              <div class="flow-step-head"><span class="flow-step-title">Settle After Key Handover</span><span class="flow-step-arrow">›</span></div>
-              <div class="flow-step-desc">After handing over the keys, call settleListing(). Escrow + collateral are released to you. If you miss the deadline, tenant gets 10% of your collateral.</div>
-              <div class="flow-step-detail"><div class="flow-step-chips"><span class="chip">settleListing(appId, C_T, t, nonce, σ)</span><span class="chip">Escrow + collateral → landlord</span><span class="chip">⚠ Slash: collateral × 10% if expired</span></div></div>
-            </div>
-          </div>
-        </div>
-
-        <div id="fr-tn" class="flow-steps hidden">
-          <div class="flow-step" onclick="toggleStep(this,'tn')">
-            <div class="flow-step-icon">🔗</div>
-            <div class="flow-step-body">
-              <div class="flow-step-head"><span class="flow-step-title">Connect &amp; Identity Check</span><span class="flow-step-arrow">›</span></div>
-              <div class="flow-step-desc">Connect MetaMask. E-Devlet lookup detects you as a tenant. Your income eligibility is verified off-chain — income never appears on-chain.</div>
-              <div class="flow-step-detail"><div class="flow-step-chips"><span class="chip">MetaMask BrowserProvider</span><span class="chip">Role: Tenant auto-detected</span><span class="chip">Income check: off-chain only</span></div></div>
-            </div>
-          </div>
-          <div class="flow-step" onclick="toggleStep(this,'tn')">
-            <div class="flow-step-icon">🔍</div>
-            <div class="flow-step-body">
-              <div class="flow-step-head"><span class="flow-step-title">Browse &amp; Select Listing</span><span class="flow-step-arrow">›</span></div>
-              <div class="flow-step-desc">Go to Listings to browse all ACTIVE properties. Filter by type (Rent/Sale) and price. Click Apply Now to start the application flow.</div>
-              <div class="flow-step-detail"><div class="flow-step-chips"><span class="chip">ListingRegistered events</span><span class="chip">Filter: status=ACTIVE</span><span class="chip">Click → applyToListing flow</span></div></div>
-            </div>
-          </div>
-          <div class="flow-step" onclick="toggleStep(this,'tn')">
-            <div class="flow-step-icon">📋</div>
-            <div class="flow-step-body">
-              <div class="flow-step-head"><span class="flow-step-title">Income Eligibility Attestation</span><span class="flow-step-arrow">›</span></div>
-              <div class="flow-step-desc">Notary checks income ≥ policy threshold against E-Devlet/SGK records. Only the predicate result (true/false) is used — your income figure stays private.</div>
-              <div class="flow-step-detail"><div class="flow-step-chips"><span class="chip">POST /notary/attest-application</span><span class="chip">income ≥ 20,000 TRY/mo (OWN_RENT_V1)</span><span class="chip">Zero-knowledge: predicate only</span></div></div>
-            </div>
-          </div>
-          <div class="flow-step" onclick="toggleStep(this,'tn')">
-            <div class="flow-step-icon">💸</div>
-            <div class="flow-step-body">
-              <div class="flow-step-head"><span class="flow-step-title">Submit Application + Escrow</span><span class="flow-step-arrow">›</span></div>
-              <div class="flow-step-desc">MetaMask sends applyToListing() with your attestation and escrow deposit in a single atomic transaction. Listing flips to LOCKED — reserved exclusively for you.</div>
-              <div class="flow-step-detail"><div class="flow-step-chips"><span class="chip">applyToListing(adHash, policyId, C_T, t, nonce, σ)</span><span class="chip">msg.value = reqEscrow</span><span class="chip">Listing → LOCKED</span></div></div>
-            </div>
-          </div>
-          <div class="flow-step" onclick="toggleStep(this,'tn')">
-            <div class="flow-step-icon">🛡</div>
-            <div class="flow-step-body">
-              <div class="flow-step-head"><span class="flow-step-title">Slashing Protection</span><span class="flow-step-arrow">›</span></div>
-              <div class="flow-step-desc">If the landlord misses the settlement deadline, call expireApplication(). You get your full escrow back plus 10% of the landlord's collateral as a penalty.</div>
-              <div class="flow-step-detail"><div class="flow-step-chips"><span class="chip">expireApplication(appId)</span><span class="chip">Returns: escrow + collateral × 10%</span><span class="chip">Listing reactivates for other tenants</span></div></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Live Protocol Simulation -->
-    <div style="background:var(--c-surface);border-top:1px solid var(--c-border);border-bottom:1px solid var(--c-border);padding:72px 24px">
-      <div style="max-width:1100px;margin:0 auto">
-        <div style="text-align:center;margin-bottom:48px">
-          <div class="section-label">Live Simulation</div>
-          <div class="section-title">Watch the Protocol in Action</div>
-          <p class="section-sub" style="margin:0 auto">An animated walkthrough of a real rental transaction — from E-Devlet identity check to on-chain settlement.</p>
-          <div id="proto-anim" style="margin: 36px auto 0; max-width: 900px; border-radius: var(--radius-xl); overflow: hidden; border: 1px solid var(--c-border2); background: var(--c-bg); padding: 32px; position:relative;">
-            <!-- Animated flow nodes -->
-            <div style="display:flex;align-items:center;justify-content:center;gap:0;flex-wrap:wrap;position:relative;min-height:120px">
-              <div class="anim-node" id="an-landlord" style="display:flex;flex-direction:column;align-items:center;gap:8px;z-index:2;min-width:100px">
-                <div style="width:56px;height:56px;border-radius:50%;background:var(--c-green2);border:2px solid var(--c-green);display:flex;align-items:center;justify-content:center;font-size:1.5rem;transition:all .5s ease">🏠</div>
-                <span style="font-size:.75rem;font-weight:700;color:var(--c-green);font-family:var(--mono)">Landlord</span>
-              </div>
-              <div class="anim-arrow" id="aa-1" style="display:flex;align-items:center;padding:0 8px;opacity:.3;transition:all .5s ease">
-                <svg width="60" height="24"><line x1="0" y1="12" x2="48" y2="12" stroke="var(--c-border2)" stroke-width="2" stroke-dasharray="4 3"/><polygon points="48,6 60,12 48,18" fill="var(--c-border2)"/></svg>
-              </div>
-              <div class="anim-node" id="an-edevlet" style="display:flex;flex-direction:column;align-items:center;gap:8px;z-index:2;min-width:100px">
-                <div style="width:56px;height:56px;border-radius:50%;background:var(--c-amber2);border:2px solid rgba(245,183,49,.3);display:flex;align-items:center;justify-content:center;font-size:1.5rem;transition:all .5s ease">🏛</div>
-                <span style="font-size:.75rem;font-weight:700;color:var(--c-amber);font-family:var(--mono)">E-Devlet</span>
-              </div>
-              <div class="anim-arrow" id="aa-2" style="display:flex;align-items:center;padding:0 8px;opacity:.3;transition:all .5s ease">
-                <svg width="60" height="24"><line x1="0" y1="12" x2="48" y2="12" stroke="var(--c-border2)" stroke-width="2" stroke-dasharray="4 3"/><polygon points="48,6 60,12 48,18" fill="var(--c-border2)"/></svg>
-              </div>
-              <div class="anim-node" id="an-notary" style="display:flex;flex-direction:column;align-items:center;gap:8px;z-index:2;min-width:100px">
-                <div style="width:56px;height:56px;border-radius:50%;background:var(--c-violet2);border:2px solid rgba(160,140,248,.3);display:flex;align-items:center;justify-content:center;font-size:1.5rem;transition:all .5s ease">🔐</div>
-                <span style="font-size:.75rem;font-weight:700;color:var(--c-violet);font-family:var(--mono)">Notary</span>
-              </div>
-              <div class="anim-arrow" id="aa-3" style="display:flex;align-items:center;padding:0 8px;opacity:.3;transition:all .5s ease">
-                <svg width="60" height="24"><line x1="0" y1="12" x2="48" y2="12" stroke="var(--c-border2)" stroke-width="2" stroke-dasharray="4 3"/><polygon points="48,6 60,12 48,18" fill="var(--c-border2)"/></svg>
-              </div>
-              <div class="anim-node" id="an-contract" style="display:flex;flex-direction:column;align-items:center;gap:8px;z-index:2;min-width:100px">
-                <div style="width:56px;height:56px;border-radius:50%;background:rgba(91,99,240,.12);border:2px solid rgba(91,99,240,.3);display:flex;align-items:center;justify-content:center;font-size:1.5rem;transition:all .5s ease">⛓</div>
-                <span style="font-size:.75rem;font-weight:700;color:var(--c-indigo);font-family:var(--mono)">Contract</span>
-              </div>
-              <div class="anim-arrow" id="aa-4" style="display:flex;align-items:center;padding:0 8px;opacity:.3;transition:all .5s ease">
-                <svg width="60" height="24"><line x1="0" y1="12" x2="48" y2="12" stroke="var(--c-border2)" stroke-width="2" stroke-dasharray="4 3"/><polygon points="48,6 60,12 48,18" fill="var(--c-border2)"/></svg>
-              </div>
-              <div class="anim-node" id="an-tenant" style="display:flex;flex-direction:column;align-items:center;gap:8px;z-index:2;min-width:100px">
-                <div style="width:56px;height:56px;border-radius:50%;background:var(--c-indigo3);border:2px solid rgba(91,99,240,.3);display:flex;align-items:center;justify-content:center;font-size:1.5rem;transition:all .5s ease">👤</div>
-                <span style="font-size:.75rem;font-weight:700;color:var(--c-indigo);font-family:var(--mono)">Tenant</span>
-              </div>
-            </div>
-            <!-- Step info -->
-            <div id="anim-step-info" style="margin-top:28px;text-align:center;min-height:60px;transition:all .4s ease">
-              <div id="anim-step-title" style="font-weight:800;font-size:1rem;margin-bottom:6px;color:var(--c-txt1)"></div>
-              <div id="anim-step-desc" style="font-size:.85rem;color:var(--c-txt2);max-width:600px;margin:0 auto;line-height:1.6"></div>
-            </div>
-            <!-- Progress dots -->
-            <div style="display:flex;justify-content:center;gap:8px;margin-top:20px">
-              <div class="anim-dot" style="width:8px;height:8px;border-radius:50%;background:var(--c-indigo);transition:all .3s ease"></div>
-              <div class="anim-dot" style="width:8px;height:8px;border-radius:50%;background:var(--c-border2);transition:all .3s ease"></div>
-              <div class="anim-dot" style="width:8px;height:8px;border-radius:50%;background:var(--c-border2);transition:all .3s ease"></div>
-              <div class="anim-dot" style="width:8px;height:8px;border-radius:50%;background:var(--c-border2);transition:all .3s ease"></div>
-              <div class="anim-dot" style="width:8px;height:8px;border-radius:50%;background:var(--c-border2);transition:all .3s ease"></div>
-            </div>
-          </div>
-        </div>
-        <div class="sim-two-col" style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
-          <!-- Left: Actor flow diagram -->
-          <div class="sim-sticky" style="position:sticky;top:80px">
-            <div style="background:var(--c-card);border:1px solid var(--c-border);border-radius:var(--radius-xl);padding:24px">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-                <span style="font-size:.75rem;font-family:var(--mono);color:var(--c-txt3);text-transform:uppercase;letter-spacing:.08em">Protocol Actors</span>
-                <span class="badge b-active" id="sim-step-badge">Step 1 / 6</span>
-              </div>
-              <!-- Actors -->
-              <div style="display:grid;gap:10px;margin-bottom:20px">
-                <div class="sim-actor" id="sa-edevlet" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:var(--radius);border:1px solid var(--c-border);transition:all .4s ease;background:var(--c-card2)">
-                  <div style="width:38px;height:38px;border-radius:9px;background:var(--c-amber2);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0">🏛</div>
-                  <div><div style="font-size:.85rem;font-weight:700">E-Devlet</div><div style="font-size:.72rem;color:var(--c-txt3);font-family:var(--mono)">e-devlet.gov.tr</div></div>
-                </div>
-                <div class="sim-actor" id="sa-notary" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:var(--radius);border:1px solid var(--c-border);transition:all .4s ease;background:var(--c-card2)">
-                  <div style="width:38px;height:38px;border-radius:9px;background:var(--c-violet2);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0">🔐</div>
-                  <div><div style="font-size:.85rem;font-weight:700">Notary Network</div><div style="font-size:.72rem;color:var(--c-txt3);font-family:var(--mono)">ECDSA Attestation</div></div>
-                </div>
-                <div class="sim-actor" id="sa-contract" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:var(--radius);border:1px solid var(--c-border);transition:all .4s ease;background:var(--c-card2)">
-                  <div style="width:38px;height:38px;border-radius:9px;background:rgba(251,191,36,.1);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0">⛓</div>
-                  <div><div style="font-size:.85rem;font-weight:700">Smart Contract</div><div style="font-size:.72rem;color:var(--c-txt3);font-family:var(--mono)">PPREVSingle.sol</div></div>
-                </div>
-                <div class="sim-actor" id="sa-landlord" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:var(--radius);border:1px solid var(--c-border);transition:all .4s ease;background:var(--c-card2)">
-                  <div style="width:38px;height:38px;border-radius:9px;background:var(--c-green2);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0">🏠</div>
-                  <div><div style="font-size:.85rem;font-weight:700">Landlord</div><div style="font-size:.72rem;color:var(--c-txt3);font-family:var(--mono)">0x7099…9C8</div></div>
-                </div>
-                <div class="sim-actor" id="sa-tenant" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:var(--radius);border:1px solid var(--c-border);transition:all .4s ease;background:var(--c-card2)">
-                  <div style="width:38px;height:38px;border-radius:9px;background:var(--c-indigo3);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0">👤</div>
-                  <div><div style="font-size:.85rem;font-weight:700">Tenant</div><div style="font-size:.72rem;color:var(--c-txt3);font-family:var(--mono)">0x3C44…3BC</div></div>
-                </div>
-              </div>
-              <div style="height:3px;background:var(--c-border);border-radius:2px;overflow:hidden">
-                <div id="sim-global-progress" style="height:100%;background:linear-gradient(90deg,var(--c-indigo2),var(--c-green));width:0%;transition:width .8s ease"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Right: Terminal output -->
-          <div>
-            <div style="background:var(--c-bg);border:1px solid var(--c-border);border-radius:var(--radius-xl);overflow:hidden">
-              <!-- Terminal title bar -->
-              <div style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--c-border);background:var(--c-card)">
-                <div style="width:11px;height:11px;border-radius:50%;background:#ff5f57"></div>
-                <div style="width:11px;height:11px;border-radius:50%;background:#febc2e"></div>
-                <div style="width:11px;height:11px;border-radius:50%;background:#28c840"></div>
-                <span style="flex:1;text-align:center;font-size:.74rem;color:var(--c-txt3);font-family:var(--mono)">pprev-protocol — notary-server</span>
-                <button class="btn btn-ghost" style="padding:3px 10px;font-size:.72rem" onclick="simRestart()">↺ Restart</button>
-              </div>
-              <div id="sim-terminal-output" style="padding:16px 20px;min-height:420px;font-family:var(--mono);font-size:.78rem;line-height:1.6"></div>
-            </div>
-            <!-- Step description -->
-            <div id="sim-step-desc" style="margin-top:16px;padding:18px;background:var(--c-card);border:1px solid var(--c-border);border-radius:var(--radius-lg)">
-              <div style="font-weight:700;font-size:.9rem;margin-bottom:6px" id="sim-step-title">Starting simulation…</div>
-              <div style="font-size:.82rem;color:var(--c-txt2);line-height:1.55" id="sim-step-body"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Three pillars -->
-    <div class="wrap">
-      <div style="text-align:center;margin-bottom:40px">
-        <div class="section-label">Architecture</div>
-        <div class="section-title" style="margin-bottom:0">Three Pillars of Trust</div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin-bottom:60px">
-        <div class="card" style="padding:26px;text-align:center">
-          <div style="width:50px;height:50px;border-radius:12px;background:var(--c-amber2);display:flex;align-items:center;justify-content:center;font-size:1.3rem;margin:0 auto 16px">🔐</div>
-          <h3 style="font-size:1rem;font-weight:700;margin-bottom:8px">E-Devlet / TLSNotary</h3>
-          <p style="font-size:.83rem;color:var(--c-txt2);line-height:1.6">Ownership and income records from the Turkish e-Government portal, attested by the Notary Network via ECDSA signatures.</p>
-        </div>
-        <div class="card" style="padding:26px;text-align:center">
-          <div style="width:50px;height:50px;border-radius:12px;background:var(--c-indigo3);display:flex;align-items:center;justify-content:center;font-size:1.3rem;margin:0 auto 16px">🛡</div>
-          <h3 style="font-size:1rem;font-weight:700;margin-bottom:8px">Privacy Preservation</h3>
-          <p style="font-size:.83rem;color:var(--c-txt2);line-height:1.6">Only predicate results (owns=true, income≥N) go on-chain. PII, income figures, and registry data stay off-chain and private.</p>
-        </div>
-        <div class="card" style="padding:26px;text-align:center">
-          <div style="width:50px;height:50px;border-radius:12px;background:var(--c-green2);display:flex;align-items:center;justify-content:center;font-size:1.3rem;margin:0 auto 16px">⛓</div>
-          <h3 style="font-size:1rem;font-weight:700;margin-bottom:8px">Smart Contract Enforcement</h3>
-          <p style="font-size:.83rem;color:var(--c-txt2);line-height:1.6">Escrow, slashing, and state machines enforced on-chain. ECDSA with ecrecover. Nonces prevent replay. Collateral creates real settlement incentives.</p>
-        </div>
+        <div class="row"><label>Policy R</label><select id="reg-pol-r"></select></div>
+        <div class="row"><label>Policy A</label><select id="reg-pol-a"></select></div>
+        <div class="row"><label>Policy S</label><select id="reg-pol-s"></select></div>
+        <div class="row"><label>txData</label>
+          <textarea id="reg-txdata">{"kind":"rental","propertyId":"PROPERTY-001","rentMonthly":1500,"durationMonths":12}</textarea></div>
+        <div class="row"><label>Required escrow (ETH)</label>
+          <input id="reg-escrow" value="0.05" /></div>
+        <div class="row"><label>Collateral (ETH)</label>
+          <input id="reg-collateral" value="0.1" /></div>
+        <button class="btn btn-green" onclick="doRegister()">Register on-chain</button>
       </div>
 
-      <div style="text-align:center;margin-bottom:40px">
-        <div class="section-label">Use Cases</div>
-        <div class="section-title" style="margin-bottom:0">Renting &amp; Selling</div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:40px">
-        <div class="card" style="padding:26px;border-top:2px solid var(--c-green)">
-          <h3 style="font-size:1rem;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px">🏠 Renting</h3>
-          <ul style="list-style:none;display:flex;flex-direction:column;gap:9px">
-            <li style="display:flex;align-items:center;gap:9px;font-size:.85rem;color:var(--c-txt2)"><span style="color:var(--c-green);font-size:.6rem">●</span>Ownership proof via π<sub>own</sub> — prove you can lease</li>
-            <li style="display:flex;align-items:center;gap:9px;font-size:.85rem;color:var(--c-txt2)"><span style="color:var(--c-green);font-size:.6rem">●</span>Income eligibility via π<sub>elig</sub> — income ≥ 3× rent</li>
-            <li style="display:flex;align-items:center;gap:9px;font-size:.85rem;color:var(--c-txt2)"><span style="color:var(--c-green);font-size:.6rem">●</span>Deposit escrowed on-chain with timeout protection</li>
-            <li style="display:flex;align-items:center;gap:9px;font-size:.85rem;color:var(--c-txt2)"><span style="color:var(--c-green);font-size:.6rem">●</span>Subletting fraud blocked by fresh ownership checks</li>
-          </ul>
-        </div>
-        <div class="card" style="padding:26px;border-top:2px solid var(--c-violet)">
-          <h3 style="font-size:1rem;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px">🏗 Selling</h3>
-          <ul style="list-style:none;display:flex;flex-direction:column;gap:9px">
-            <li style="display:flex;align-items:center;gap:9px;font-size:.85rem;color:var(--c-txt2)"><span style="color:var(--c-violet);font-size:.6rem">●</span>Title + encumbrance verification — no active liens</li>
-            <li style="display:flex;align-items:center;gap:9px;font-size:.85rem;color:var(--c-txt2)"><span style="color:var(--c-violet);font-size:.6rem">●</span>Valuation predicate — appraised value ≥ V<sub>min</sub></li>
-            <li style="display:flex;align-items:center;gap:9px;font-size:.85rem;color:var(--c-txt2)"><span style="color:var(--c-violet);font-size:.6rem">●</span>Purchase funds escrowed with extended τ<sub>lock</sub></li>
-            <li style="display:flex;align-items:center;gap:9px;font-size:.85rem;color:var(--c-txt2)"><span style="color:var(--c-violet);font-size:.6rem">●</span>Cross-listing fraud blocked by LOCKED state</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══════════ PAGE: LISTINGS ══════════ -->
-  <div class="page" id="page-listings">
-    <div class="wrap">
-      <div class="page-header">
-        <h2>Browse Listings</h2>
-        <button class="btn btn-primary btn-sm" onclick="switchRole('landlord');navigate('dashboard')">+ Create Listing</button>
-      </div>
-      <div class="filter-row">
-        <select id="filter-type" onchange="renderListings()">
-          <option value="all">All Types</option>
-          <option value="rent">Rent</option>
-          <option value="sale">Sale</option>
-        </select>
-        <select id="filter-status" onchange="renderListings()">
-          <option value="all">All Status</option>
-          <option value="ACTIVE">Active</option>
-          <option value="LOCKED">Locked</option>
-          <option value="SETTLED">Settled</option>
-        </select>
-        <input type="text" id="filter-search" placeholder="Search by address or hash…" oninput="renderListings()" style="max-width:none;flex:2">
-      </div>
-      <div class="listings-grid" id="listings-grid"></div>
-    </div>
-  </div>
-
-  <!-- ══════════ PAGE: DASHBOARD ══════════ -->
-  <div class="page" id="page-dashboard">
-    <div class="wrap">
-      <!-- LANDLORD -->
-      <div id="dash-ll">
-        <div class="page-header">
-          <h2>Landlord Dashboard</h2>
-        </div>
-        <div class="stats-grid">
-          <div class="stat-card"><div class="s-lbl">Active Listings</div><div class="s-val" id="s-active">0</div></div>
-          <div class="stat-card"><div class="s-lbl">Pending Apps</div><div class="s-val" id="s-apps">0</div></div>
-          <div class="stat-card"><div class="s-lbl">Locked Escrow</div><div class="s-val" id="s-locked">0 ETH</div></div>
-          <div class="stat-card"><div class="s-lbl">Settled</div><div class="s-val" id="s-settled">0</div></div>
-        </div>
-        <div class="tabs-row">
-          <button class="tab-btn active" onclick="switchTab(this,'ltab','ltab-create')">Create Listing</button>
-          <button class="tab-btn"        onclick="switchTab(this,'ltab','ltab-mine')">My Listings</button>
-          <button class="tab-btn"        onclick="switchTab(this,'ltab','ltab-apps')">Applications</button>
-          <button class="tab-btn"        onclick="switchTab(this,'ltab','ltab-settle')">Settlements</button>
-        </div>
-
-        <!-- Create listing -->
-        <div class="tab-panel active ltab" id="ltab-create" style="display:block">
-          <div class="stepper" id="stepper-create">
-            <div class="step-node active" data-step="1"><div class="step-num">1</div><div class="step-lbl">Metadata</div></div>
-            <div class="step-node"        data-step="2"><div class="step-num">2</div><div class="step-lbl">Attestation</div></div>
-            <div class="step-node"        data-step="3"><div class="step-num">3</div><div class="step-lbl">Proof</div></div>
-            <div class="step-node"        data-step="4"><div class="step-num">4</div><div class="step-lbl">Submit</div></div>
-          </div>
-          <!-- Step 1 -->
-          <div class="step-content" id="cs1">
-            <h3>Property Details</h3>
-            <p class="sub">Fill in your listing metadata. The Ad_Hash will be derived from this — any change later invalidates the listing.</p>
-            <div class="form-grid">
-              <div class="form-col2 form-row">
-                <span class="form-label">Listing Type</span>
-                <div class="radio-group">
-                  <label><input type="radio" name="list-type" value="rent" checked> Rent</label>
-                  <label><input type="radio" name="list-type" value="sale"> Sale</label>
-                </div>
-              </div>
-              <div class="form-row"><label class="form-label">Property Address</label><input type="text" id="inp-address" placeholder="e.g. Kadıköy, İstanbul"></div>
-              <div class="form-row"><label class="form-label">Price (ETH)</label><input type="number" id="inp-price" placeholder="0.5" step="0.01"></div>
-              <div class="form-col2 form-row"><label class="form-label">Description</label><textarea id="inp-desc" placeholder="Describe the property…"></textarea></div>
-              <div class="form-row"><label class="form-label">Collateral Bond (ETH)</label><input type="number" id="inp-bond" placeholder="0.1" step="0.01" min="0.1"></div>
-              <div class="form-row"><label class="form-label">Required Escrow (ETH)</label><input type="number" id="inp-escrow" placeholder="0.15" step="0.01" min="0.01"></div>
-              <div class="form-col2 form-row">
-                <span class="form-label">Required Proofs (Policy)</span>
-                <div class="check-group">
-                  <label><input type="checkbox" id="chk-own" checked disabled> Ownership (π_own)</label>
-                  <label><input type="checkbox" id="chk-income"> Income ≥ N×price</label>
-                  <label><input type="checkbox" id="chk-lien"> Title lien-free</label>
-                </div>
-              </div>
-            </div>
-            <div class="step-footer">
-              <button class="btn btn-primary" onclick="validateCreateStep1()">Next →</button>
-            </div>
-          </div>
-          <!-- Step 2 -->
-          <div class="step-content hidden" id="cs2">
-            <h3>TLSNotary Ownership Attestation</h3>
-            <p class="sub">Fetching ownership record from E-Devlet via the Notary Network…</p>
-            <div class="terminal" id="sim-own">
-              <div class="t-line" data-delay="400"><div class="t-spinner"></div><span class="t-text">Connecting to E-Devlet (HTTPS)…</span></div>
-              <div class="t-line" data-delay="1200"><div class="t-spinner"></div><span class="t-text">Fetching ownership record…</span></div>
-              <div class="t-line" data-delay="2000"><div class="t-spinner"></div><span class="t-text">MPC-TLS session with Notary Network…</span></div>
-              <div class="t-line" data-delay="2900"><div class="t-spinner"></div><span class="t-text">Generating transcript commitment C_T…</span></div>
-              <div class="t-line" data-delay="3600"><div class="t-spinner"></div><span class="t-text">ECDSA signature from Notary…</span></div>
-              <div class="t-meta hidden" id="own-meta">
-                <div class="t-meta-item"><span class="k">Nonce </span><span class="v" id="own-nonce"></span></div>
-                <div class="t-meta-item"><span class="k">Timestamp </span><span class="v" id="own-ts"></span></div>
-                <div class="t-meta-item"><span class="k">C_T </span><span class="v" id="own-ct">0x9a3f…</span></div>
-                <div class="t-meta-item"><span class="k">Source </span><span class="v">e-devlet.gov.tr</span></div>
-              </div>
-            </div>
-            <div class="step-footer">
-              <button class="btn btn-ghost" onclick="createStep(1)">← Back</button>
-              <button class="btn btn-primary hidden" id="own-next-btn" onclick="createStep(3)">Next →</button>
-            </div>
-          </div>
-          <!-- Step 3 -->
-          <div class="step-content hidden" id="cs3">
-            <h3>Notary Attestation Proof</h3>
-            <p class="sub">Generating ownership proof — proving the predicate without revealing personal data…</p>
-            <div class="terminal">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                <span style="font-size:.74rem;color:var(--c-txt3)">Generating π_own…</span>
-                <span style="font-size:.74rem;color:var(--c-indigo)" id="zk-pct-own">0%</span>
-              </div>
-              <div class="progress-bar"><div class="progress-fill" id="zk-bar-own"></div></div>
-              <div style="margin-top:16px">
-                <div style="font-size:.68rem;color:var(--c-txt3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px">Public Inputs</div>
-                <div class="data-row"><span class="dk">C_T</span><span class="dv pub" id="zk-ct-own"></span></div>
-                <div class="data-row"><span class="dk">Ad_Hash</span><span class="dv pub" id="zk-adhash-own"></span></div>
-                <div class="data-row"><span class="dk">PolicyID</span><span class="dv pub" id="zk-policy-own"></span></div>
-              </div>
-              <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--c-border)">
-                <div style="font-size:.68rem;color:var(--c-txt3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px">Private (Hidden)</div>
-                <div class="data-row"><span class="dk">Registry</span><span class="dv prv">███████████</span></div>
-                <div class="data-row"><span class="dk">PII</span><span class="dv prv">████████</span></div>
-              </div>
-              <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--c-border)">
-                <div class="data-row"><span class="dk">Predicate</span><span class="dv" id="zk-result-own" style="color:var(--c-txt3)">pending…</span></div>
-              </div>
-            </div>
-            <div class="step-footer">
-              <button class="btn btn-ghost" onclick="createStep(2)">← Back</button>
-              <button class="btn btn-primary hidden" id="zk-next-own" onclick="createStep(4)">Next →</button>
-            </div>
-          </div>
-          <!-- Step 4 -->
-          <div class="step-content hidden" id="cs4">
-            <h3>On-Chain Submission</h3>
-            <p class="sub">Smart contract verifying signature, freshness, nonce, and collateral…</p>
-            <div class="verify-list" id="verify-own">
-              <div class="verify-item" data-delay="300"><div class="v-icon ok">✓</div><span>Notary ECDSA signature valid (ecrecover)</span></div>
-              <div class="verify-item" data-delay="800"><div class="v-icon ok">✓</div><span>Freshness check passed (now − t_auth ≤ Δ)</span></div>
-              <div class="verify-item" data-delay="1300"><div class="v-icon ok">✓</div><span>Nonce unused — replay protection confirmed</span></div>
-              <div class="verify-item" data-delay="1800"><div class="v-icon ok">✓</div><span>Policy whitelisted on-chain</span></div>
-              <div class="verify-item" data-delay="2200"><div class="v-icon ok">✓</div><span>Collateral deposited (≥ minCollateral)</span></div>
-            </div>
-            <div id="submit-result" class="result-box hidden" style="margin-top:20px">
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-weight:700">✓ Listing Registered Successfully</div>
-              <div class="data-row"><span class="dk">Status</span><span class="b-active badge" style="font-size:.72rem">ACTIVE</span></div>
-              <div class="data-row"><span class="dk">Ad_Hash</span><span class="dv mono" id="result-adhash"></span></div>
-            </div>
-            <div class="step-footer">
-              <button class="btn btn-ghost" onclick="createStep(3)">← Back</button>
-              <button class="btn btn-green hidden" id="submit-done-btn" onclick="finishCreate()">View My Listings →</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- My listings -->
-        <div class="tab-panel ltab" id="ltab-mine">
-          <div class="table-wrap"><table>
-            <thead><tr><th>Ad_Hash</th><th>Type</th><th>Price</th><th>Status</th><th>Apps</th><th>Actions</th></tr></thead>
-            <tbody id="my-listings-body"></tbody>
-          </table></div>
-        </div>
-        <!-- Applications -->
-        <div class="tab-panel ltab" id="ltab-apps">
-          <div class="table-wrap"><table>
-            <thead><tr><th>App ID</th><th>Listing</th><th>Tenant</th><th>Attestation</th><th>Escrow</th><th>Actions</th></tr></thead>
-            <tbody id="apps-body"></tbody>
-          </table></div>
-        </div>
-        <!-- Settlements -->
-        <div class="tab-panel ltab" id="ltab-settle">
-          <div id="landlord-settle-content"></div>
-        </div>
+      <!-- Phase 2: Apply & Engage -->
+      <div class="card">
+        <h2>2 · Apply &amp; Engage (φ_A)</h2>
+        <p style="color: var(--c-txt2); font-size: 0.82rem; margin: 0 0 12px">
+          A counterparty submits an application (status PENDING). The listing owner subsequently
+          calls <code>engage</code> to lock the listing.
+        </p>
+        <div class="row"><label>txID (C_tx)</label>
+          <input id="apply-txid" placeholder="0x…" /></div>
+        <div class="row"><label>Deposit (ETH)</label>
+          <input id="apply-deposit" value="0.05" /></div>
+        <button class="btn btn-green" onclick="doApply()">Submit application</button>
+        <hr style="border-color: var(--c-border); margin: 16px 0" />
+        <div class="row"><label>appId to engage</label>
+          <input id="engage-appid" placeholder="0x…" /></div>
+        <div class="row"><label>Lock window (s, 0=default)</label>
+          <input id="engage-lock" value="0" /></div>
+        <button class="btn btn-amber" onclick="doEngage()">Engage (listing owner)</button>
       </div>
 
-      <!-- TENANT -->
-      <div id="dash-tn" class="hidden">
-        <div class="page-header">
-          <h2>Tenant Dashboard</h2>
-        </div>
-        <div class="stats-grid">
-          <div class="stat-card"><div class="s-lbl">My Applications</div><div class="s-val" id="ts-apps">0</div></div>
-          <div class="stat-card"><div class="s-lbl">Pending</div><div class="s-val" id="ts-pending">0</div></div>
-          <div class="stat-card"><div class="s-lbl">Escrowed</div><div class="s-val" id="ts-escrowed">0 ETH</div></div>
-          <div class="stat-card"><div class="s-lbl">Settled</div><div class="s-val" id="ts-settled">0</div></div>
-        </div>
-        <div class="tabs-row">
-          <button class="tab-btn active" onclick="switchTab(this,'ttab','ttab-browse')">Browse &amp; Apply</button>
-          <button class="tab-btn"        onclick="switchTab(this,'ttab','ttab-myapps')">My Applications</button>
-          <button class="tab-btn"        onclick="switchTab(this,'ttab','ttab-settle')">Settlements</button>
-        </div>
-        <!-- Browse -->
-        <div class="tab-panel active ttab" id="ttab-browse" style="display:block">
-          <div id="tbrowse-grid">
-            <div class="listings-grid" id="tenant-listings-grid"></div>
-          </div>
-          <div id="tbrowse-flow" class="hidden">
-            <div class="stepper" id="stepper-apply">
-              <div class="step-node active" data-step="1"><div class="step-num">1</div><div class="step-lbl">Review</div></div>
-              <div class="step-node"        data-step="2"><div class="step-num">2</div><div class="step-lbl">Eligibility</div></div>
-              <div class="step-node"        data-step="3"><div class="step-num">3</div><div class="step-lbl">Proof</div></div>
-              <div class="step-node"        data-step="4"><div class="step-num">4</div><div class="step-lbl">Submit</div></div>
-            </div>
-            <!-- Apply Step 1 -->
-            <div class="step-content" id="as1">
-              <h3>Listing Requirements</h3>
-              <div id="apply-review"></div>
-              <div class="step-footer">
-                <button class="btn btn-ghost" onclick="cancelApply()">← Cancel</button>
-                <button class="btn btn-primary" onclick="applyStep(2)">Prove Eligibility →</button>
-              </div>
-            </div>
-            <!-- Apply Step 2 -->
-            <div class="step-content hidden" id="as2">
-              <h3>TLSNotary Eligibility Attestation</h3>
-              <p class="sub">Fetching eligibility records via the Notary Network…</p>
-              <div class="terminal" id="sim-elig">
-                <div class="t-line" data-delay="400"><div class="t-spinner"></div><span class="t-text">Connecting to data source (HTTPS)…</span></div>
-                <div class="t-line" data-delay="1100"><div class="t-spinner"></div><span class="t-text">Fetching income / employment record…</span></div>
-                <div class="t-line" data-delay="1900"><div class="t-spinner"></div><span class="t-text">MPC-TLS session with Notary Network…</span></div>
-                <div class="t-line" data-delay="2700"><div class="t-spinner"></div><span class="t-text">Generating transcript commitment C_T_elig…</span></div>
-                <div class="t-line" data-delay="3400"><div class="t-spinner"></div><span class="t-text">ECDSA signature from Notary…</span></div>
-                <div class="t-meta hidden" id="elig-meta">
-                  <div class="t-meta-item"><span class="k">Nonce </span><span class="v" id="elig-nonce"></span></div>
-                  <div class="t-meta-item"><span class="k">Timestamp </span><span class="v" id="elig-ts"></span></div>
-                </div>
-              </div>
-              <div class="step-footer">
-                <button class="btn btn-ghost" onclick="applyStep(1)">← Back</button>
-                <button class="btn btn-primary hidden" id="elig-next-btn" onclick="applyStep(3)">Next →</button>
-              </div>
-            </div>
-            <!-- Apply Step 3 -->
-            <div class="step-content hidden" id="as3">
-              <h3>Eligibility Proof Generation</h3>
-              <p class="sub">Generating π_elig — proving income ≥ threshold without revealing the figure…</p>
-              <div class="terminal">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                  <span style="font-size:.74rem;color:var(--c-txt3)">Generating π_elig…</span>
-                  <span style="font-size:.74rem;color:var(--c-indigo)" id="zk-pct-elig">0%</span>
-                </div>
-                <div class="progress-bar"><div class="progress-fill" id="zk-bar-elig"></div></div>
-                <div style="margin-top:16px">
-                  <div style="font-size:.68rem;color:var(--c-txt3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px">Public Inputs</div>
-                  <div class="data-row"><span class="dk">C_T_elig</span><span class="dv pub" id="zk-ct-elig"></span></div>
-                  <div class="data-row"><span class="dk">Ad_Hash</span><span class="dv pub" id="zk-adhash-elig"></span></div>
-                  <div class="data-row"><span class="dk">PolicyID</span><span class="dv pub" id="zk-policy-elig"></span></div>
-                </div>
-                <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--c-border)">
-                  <div style="font-size:.68rem;color:var(--c-txt3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px">Private (Hidden)</div>
-                  <div class="data-row"><span class="dk">Income</span><span class="dv prv">██████</span></div>
-                  <div class="data-row"><span class="dk">Employer</span><span class="dv prv">████████</span></div>
-                </div>
-                <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--c-border)">
-                  <div class="data-row"><span class="dk">Predicate</span><span class="dv" id="zk-result-elig" style="color:var(--c-txt3)">pending…</span></div>
-                </div>
-              </div>
-              <div class="step-footer">
-                <button class="btn btn-ghost" onclick="applyStep(2)">← Back</button>
-                <button class="btn btn-primary hidden" id="zk-next-elig" onclick="applyStep(4)">Next →</button>
-              </div>
-            </div>
-            <!-- Apply Step 4 -->
-            <div class="step-content hidden" id="as4">
-              <h3>Submit Application + Escrow</h3>
-              <p class="sub">Smart contract verifying eligibility proof and locking escrow…</p>
-              <div class="verify-list" id="verify-elig">
-                <div class="verify-item" data-delay="300"><div class="v-icon ok">✓</div><span>Notary ECDSA signature valid</span></div>
-                <div class="verify-item" data-delay="800"><div class="v-icon ok">✓</div><span>Freshness check passed (≤ Δ_elig)</span></div>
-                <div class="verify-item" data-delay="1300"><div class="v-icon ok">✓</div><span>Nonce_T unused</span></div>
-                <div class="verify-item" data-delay="1800"><div class="v-icon ok">✓</div><span>Listing status = ACTIVE ✓</span></div>
-                <div class="verify-item" data-delay="2200"><div class="v-icon ok">✓</div><span>No duplicate application</span></div>
-                <div class="verify-item" data-delay="2600"><div class="v-icon ok">✓</div><span>Escrow deposited (dep ≥ ReqEscrow)</span></div>
-              </div>
-              <div id="apply-result" class="result-box hidden" style="margin-top:20px">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-weight:700">✓ Application Submitted</div>
-                <div class="data-row"><span class="dk">App Status</span><span class="b-pending badge" style="font-size:.72rem">PENDING TRANSFER</span></div>
-                <div class="data-row"><span class="dk">Listing</span><span class="b-locked badge" style="font-size:.72rem">LOCKED</span></div>
-                <div class="data-row"><span class="dk">App ID</span><span class="dv mono" id="apply-appid"></span></div>
-              </div>
-              <div class="step-footer">
-                <button class="btn btn-ghost" onclick="applyStep(3)">← Back</button>
-                <button class="btn btn-green hidden" id="apply-done-btn" onclick="finishApply()">View My Applications →</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        <!-- My apps -->
-        <div class="tab-panel ttab" id="ttab-myapps">
-          <div class="table-wrap"><table>
-            <thead><tr><th>App ID</th><th>Listing</th><th>Type</th><th>Escrow</th><th>Status</th><th>Expires</th><th>Action</th></tr></thead>
-            <tbody id="my-apps-body"></tbody>
-          </table></div>
-        </div>
-        <!-- Tenant settlements -->
-        <div class="tab-panel ttab" id="ttab-settle">
-          <div id="tenant-settle-content"></div>
-        </div>
+      <!-- Phase 3: Settle / Expire / Cancel -->
+      <div class="card">
+        <h2>3 · Settle / Expire (φ_S)</h2>
+        <p style="color: var(--c-txt2); font-size: 0.82rem; margin: 0 0 12px">
+          Listing owner settles before <code>expiresAt</code>; otherwise anyone calls
+          <code>expire</code> and the counterparty is refunded with a 10% slash of remaining
+          collateral (compounding).
+        </p>
+        <div class="row"><label>engId</label>
+          <input id="settle-engid" placeholder="0x…" /></div>
+        <button class="btn btn-green" onclick="doSettle()">Settle</button>
+        <button class="btn btn-amber" onclick="doExpire()">Expire</button>
+        <hr style="border-color: var(--c-border); margin: 16px 0" />
+        <div class="row"><label>txID to cancel</label>
+          <input id="cancel-txid" placeholder="0x…" /></div>
+        <button class="btn btn-red" onclick="doCancel()">Cancel listing</button>
       </div>
-    </div>
-  </div>
 
-  <!-- ══════════ PAGE: SETTLEMENT ══════════ -->
-  <div class="page" id="page-settlement">
-    <div class="wrap">
-      <div class="page-header"><h2>Settlement — π_trans</h2></div>
-      <div class="timeline-bar" id="settle-timeline"></div>
-      <div class="settle-grid">
-        <div class="card">
-          <h4>Escrow Status</h4>
-          <div class="big-num" id="settle-total">—</div>
-          <div class="settle-row"><span>Locked deposit</span><span id="settle-dep">—</span></div>
-          <div class="settle-row"><span>Bond (B_req)</span><span id="settle-bond">—</span></div>
-        </div>
-        <div class="card">
-          <h4>Countdown (τ_lock)</h4>
-          <div class="countdown" id="settle-countdown">—</div>
-          <div class="settle-row"><span>Expires</span><span id="settle-expires">—</span></div>
-        </div>
+      <!-- Listings table -->
+      <div class="card full">
+        <h2>Recent listings</h2>
+        <button class="btn btn-secondary" onclick="scanEvents()">↻ Scan recent events</button>
+        <div id="listing-tbl"></div>
       </div>
-      <div class="settle-actions">
-        <div class="card">
-          <h4>Landlord / Seller</h4>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-green btn-sm" onclick="confirmSettlement('landlord')">Confirm Transfer ✓</button>
-            <button class="btn btn-danger btn-sm" onclick="raiseDispute('landlord')">Raise Dispute ⚠</button>
-          </div>
-        </div>
-        <div class="card">
-          <h4>Tenant / Buyer</h4>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-primary btn-sm" onclick="confirmSettlement('tenant')">Confirm Receipt ✓</button>
-            <button class="btn btn-danger btn-sm" onclick="raiseDispute('tenant')">Raise Dispute ⚠</button>
-          </div>
-        </div>
+
+      <!-- Log -->
+      <div class="card full">
+        <h2>Activity log</h2>
+        <pre class="log" id="log"></pre>
       </div>
-      <div id="settle-proof-section" class="hidden">
-        <h3 style="font-size:1.05rem;font-weight:700;margin-bottom:14px">π_trans — Transfer Verification</h3>
-        <div class="terminal" id="sim-trans">
-          <div class="t-line" data-delay="300"><div class="t-spinner"></div><span class="t-text">Querying registry for updated ownership…</span></div>
-          <div class="t-line" data-delay="1000"><div class="t-spinner"></div><span class="t-text">TLSNotary attestation of transfer…</span></div>
-          <div class="t-line" data-delay="1800"><div class="t-spinner"></div><span class="t-text">Verifying H(registry_tenant) == H(T_addr)…</span></div>
-          <div class="t-line" data-delay="2500"><div class="t-spinner"></div><span class="t-text">Cross-chain replay check (SC_addr + chain_id)…</span></div>
-          <div class="t-line" data-delay="3200"><div class="t-spinner"></div><span class="t-text">Settlement: SETTLED ✓</span></div>
-        </div>
-        <div id="settle-final" class="result-box hidden" style="margin-top:20px;text-align:center">
-          <div style="font-size:1.4rem;margin-bottom:6px">✓</div>
-          <div style="font-weight:700;font-size:1rem">Transaction Settled Successfully</div>
-          <div style="color:var(--c-txt2);font-size:.83rem;margin-top:4px">Escrow + collateral released to landlord</div>
-        </div>
-      </div>
-    </div>
-  </div>
+    </main>
 
-  <!-- ══════════ PAGE: VISUALIZER ══════════ -->
-  <div class="page" id="page-visualizer">
-    <div class="wrap">
-      <div class="page-header"><h2>Protocol Visualizer</h2></div>
-      <div class="viz-wrap">
-        <div class="viz-stage" id="viz-stage">
-          <div class="viz-actor va-tenant">Tenant</div>
-          <div class="viz-actor va-landlord">Landlord</div>
-          <div class="viz-actor va-edevlet">e-Devlet</div>
-          <div class="viz-actor va-notary">Notary Network</div>
-          <div class="viz-actor va-contract">Ad Contract</div>
-          <div class="viz-actor va-escrow">Escrow</div>
-          <svg class="viz-svg" id="viz-svg"></svg>
-        </div>
-      </div>
-      <div class="viz-controls">
-        <button class="btn btn-ghost btn-sm" onclick="vizPrev()">◀ Prev</button>
-        <span class="viz-step-lbl" id="viz-lbl">Step 1 / 15</span>
-        <div class="viz-progress-wrap"><div class="viz-progress-fill" id="viz-prog"></div></div>
-        <button class="btn btn-ghost btn-sm" onclick="vizNext()">Next ▶</button>
-        <button class="btn btn-primary btn-sm" id="viz-auto-btn" onclick="vizAutoPlay()">▶ Auto-Play</button>
-      </div>
-      <div class="viz-detail">
-        <h4 id="viz-title">Step 1</h4>
-        <div class="viz-desc" id="viz-desc"></div>
-        <div class="viz-formula" id="viz-formula"></div>
-        <div class="viz-pv">
-          <div class="viz-pv-col prv"><h5>🔒 Private</h5><ul id="viz-prv"></ul></div>
-          <div class="viz-pv-col pub"><h5>🔓 Public</h5><ul id="viz-pub"></ul></div>
-        </div>
-      </div>
-    </div>
-  </div>
+    <script>
+      const ABI = [
+        "function register(bytes,bytes32,bytes32,bytes32,bytes32,uint256,bytes32,uint256,bytes) payable returns (bytes32)",
+        "function applyTx(bytes32,bytes32,uint256,bytes) payable returns (bytes32)",
+        "function engage(bytes32,uint256) returns (bytes32)",
+        "function settle(bytes32,bytes32,uint256,bytes)",
+        "function expire(bytes32)",
+        "function cancel(bytes32)",
+        "function getListing(bytes32) view returns (tuple(bytes32 txID,address owner,bytes32 policyId_R,bytes32 policyId_A,bytes32 policyId_S,uint256 reqEscrow,uint256 collateral,uint256 createdAt,uint8 state,uint256 expirationCount,bytes32 txDataHash))",
+        "function getApplication(bytes32) view returns (tuple(bytes32 appId,bytes32 txID,address applicant,uint256 escrow,uint256 createdAt,uint8 status))",
+        "function getEngagement(bytes32) view returns (tuple(bytes32 engId,bytes32 txID,bytes32 appId,uint256 expiresAt,uint8 status))",
+        "function freshnessWindow() view returns (uint256)",
+        "function defaultLockWindow() view returns (uint256)",
+        "function minCollateral() view returns (uint256)",
+        "event TxRegistered(bytes32 indexed txID, address indexed owner, bytes32 policyId_R, bytes32 policyId_A, bytes32 policyId_S, uint256 reqEscrow, uint256 collateral)",
+        "event ApplicationCreated(bytes32 indexed appId, bytes32 indexed txID, address indexed applicant, uint256 escrow)",
+        "event Engaged(bytes32 indexed engId, bytes32 indexed txID, bytes32 indexed appId, address owner, uint256 expiresAt)",
+        "event Settled(bytes32 indexed engId, bytes32 indexed txID, address indexed applicant, uint256 escrowTransferred, uint256 collateralReturned)",
+        "event Expired(bytes32 indexed engId, bytes32 indexed txID, address indexed applicant, uint256 escrowReturned, uint256 slashAmount)",
+        "event Cancelled(bytes32 indexed txID, address indexed owner, uint256 collateralReturned)"
+      ];
 
-</main>
+      const TX_STATE = ["NONE", "ACTIVE", "LOCKED", "SETTLED", "CANCELLED"];
 
-<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"></script>
-<script>
-/* ══════════════════════════════════════════════════════════════
-   PPREV Frontend v3 — Modern UI
-══════════════════════════════════════════════════════════════ */
+      const STATE = {
+        provider: null, signer: null, contract: null,
+        contractAddr: null, notaryUrl: "http://localhost:3001",
+        notaryAddress: null, policies: {}
+      };
 
-const NOTARY_API       = 'http://localhost:3001';
-const HARDHAT_CHAIN_ID = 31337;
+      function log(msg, kind = "info") {
+        const t = new Date().toISOString().slice(11, 19);
+        const colour = kind === "ok" ? "#34d399"
+          : kind === "err" ? "#fca5a5"
+          : kind === "warn" ? "#fbbf24" : "#aab0bf";
+        const el = document.getElementById("log");
+        el.innerHTML += `<span style="color:${colour}">[${t}] ${msg}</span>\n`;
+        el.scrollTop = el.scrollHeight;
+      }
 
-const CONTRACT_ABI = [
-  "function registerListing(bytes32,bytes32,uint256,bytes32,uint256,bytes32,bytes,bytes32[],bytes) payable",
-  "function applyToListing(bytes32,bytes32,bytes32,uint256,bytes32,bytes,bytes32[],bytes) payable",
-  "function settleListing(bytes32,bytes32,uint256,bytes32,bytes,bytes32[],bytes)",
-  "function expireApplication(bytes32)",
-  "function cancelListing(bytes32)",
-  "function getListing(bytes32) view returns (tuple(address owner,bytes32 adHash,bytes32 policyId,uint256 reqEscrow,bytes32 transcriptCommitment,uint256 collateral,uint256 createdAt,uint8 status,uint256 expirationCount))",
-  "function getApplication(bytes32) view returns (tuple(bytes32 appId,bytes32 adHash,address applicant,bytes32 policyId,bytes32 transcriptCommitment,uint256 escrowAmount,uint256 createdAt,uint8 status))",
-  "function isPolicyWhitelisted(bytes32) view returns (bool)",
-  "function minCollateral() view returns (uint256)",
-  "function expiryTimeout() view returns (uint256)",
-  "event ListingRegistered(bytes32 indexed adHash,address indexed owner,bytes32 policyId,uint256 reqEscrow,uint256 collateral)",
-  "event ApplicationCreated(bytes32 indexed appId,bytes32 indexed adHash,address indexed applicant,uint256 escrowAmount)",
-  "event ApplicationSettled(bytes32 indexed appId,bytes32 indexed adHash,address indexed applicant,uint256 escrowTransferred,uint256 collateralReturned)",
-  "event ApplicationExpired(bytes32 indexed appId,bytes32 indexed adHash,address indexed applicant,uint256 escrowReturned,uint256 slashAmount)",
-  "event ListingCancelled(bytes32 indexed adHash,address indexed owner,uint256 collateralReturned)",
-];
-
-let CONTRACT_ADDRESS = null;
-let CONTRACT_POLICIES = {};
-
-const STATE = {
-  role: 'landlord',
-  wallet: { address:null, balance:0, connected:false, provider:null, signer:null },
-  contract: null,
-  listings: [],
-  applications: [],
-  currentPage: 'home',
-  createStep: 1,
-  applyStep: 1,
-  applyTarget: null,
-  vizStep: 1,
-  vizPlaying: false,
-  demoMode: false,
-};
-
-/* ── Create step 1 validation ── */
-function validateCreateStep1(){
-  if(!document.getElementById('inp-address').value.trim()){ toast('Property address is required','wrn'); return; }
-  if(!parseFloat(document.getElementById('inp-price').value||0)){ toast('Price (ETH) is required','wrn'); return; }
-  if(parseFloat(document.getElementById('inp-bond').value||0) < 0.1){ toast('Minimum collateral bond is 0.1 ETH','wrn'); return; }
-  if(!parseFloat(document.getElementById('inp-escrow').value||0)){ toast('Required escrow amount is required','wrn'); return; }
-  createStep(2);
-}
-
-/* ── Utilities ── */
-function rHex(n=8){ return '0x'+[...Array(n)].map(()=>Math.floor(Math.random()*16).toString(16)).join('') }
-function rHash(){ return rHex(8)+'…'+rHex(4) }
-function shortAddr(a){ return a ? a.slice(0,6)+'…'+a.slice(-4) : '—' }
-function addrEq(a,b){ return a&&b&&a.toLowerCase()===b.toLowerCase() }
-function daysLeft(ts){
-  if(!ts) return '—';
-  const ms = ts - Date.now();
-  if(ms <= 0) return 'Expired';
-  const d = Math.floor(ms/86400000);
-  const h = Math.floor((ms%86400000)/3600000);
-  return d>0 ? `${d}d ${h}h` : `${h}h`;
-}
-function sbadge(s){
-  const m = { ACTIVE:'b-active', LOCKED:'b-locked', SETTLED:'b-settled', EXPIRED:'b-expired', PENDING_TRANSFER:'b-pending', CANCELLED:'b-expired' };
-  return `<span class="badge ${m[s]||'b-settled'}">${s.replace('_',' ')}</span>`;
-}
-function tbadge(t){ return `<span class="badge ${t==='rent'?'b-rent':'b-sale'}">${t.toUpperCase()}</span>` }
-
-/* ── Toast ── */
-function toast(msg, type='ok'){
-  const el = document.createElement('div');
-  el.className = `toast ${type}`;
-  el.textContent = msg;
-  document.getElementById('toasts').appendChild(el);
-  setTimeout(()=>el.remove(), 4500);
-}
-
-/* ── Modal ── */
-function showModal(){
-  document.getElementById('modal-bg').classList.remove('hidden');
-}
-function closeModal(){
-  document.getElementById('modal-bg').classList.add('hidden');
-  localStorage.setItem('pprev_seen','1');
-}
-function handleModalBg(e){ if(e.target===e.currentTarget) closeModal() }
-function switchModalTab(role){
-  document.getElementById('mtab-ll').classList.toggle('active', role==='ll');
-  document.getElementById('mtab-tn').classList.toggle('active', role==='tn');
-  document.getElementById('ob-ll').classList.toggle('hidden', role!=='ll');
-  document.getElementById('ob-tn').classList.toggle('hidden', role!=='tn');
-}
-
-/* ── Flow guide ── */
-function switchFlowRole(role){
-  document.getElementById('frtab-ll').className = 'flow-role-tab' + (role==='ll'?' ll':'');
-  document.getElementById('frtab-tn').className = 'flow-role-tab' + (role==='tn'?' tn':'');
-  document.getElementById('fr-ll').classList.toggle('hidden', role!=='ll');
-  document.getElementById('fr-tn').classList.toggle('hidden', role!=='tn');
-}
-function toggleStep(row, type){
-  const cls = 'open '+type;
-  const isOpen = row.classList.contains('open');
-  row.closest('.flow-steps').querySelectorAll('.flow-step').forEach(r=>r.classList.remove('open','ll','tn'));
-  if(!isOpen){ row.classList.add('open', type) }
-}
-
-/* ── Navigation ── */
-function navigate(page){
-  STATE.currentPage = page;
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  const el = document.getElementById('page-'+page);
-  if(el) el.classList.add('active');
-  document.querySelectorAll('.nav-link[data-nav]').forEach(a=>{
-    a.classList.toggle('active', a.dataset.nav===page);
-  });
-  if(page==='listings')  renderListings();
-  if(page==='dashboard') renderDashboard();
-}
-
-/* ── Role switch ── */
-function switchRole(role){
-  STATE.role = role;
-  const ll = document.getElementById('rbtn-ll');
-  const tn = document.getElementById('rbtn-tn');
-  if(ll) ll.className = role==='landlord' ? 'rl' : '';
-  if(tn) tn.className = role==='tenant'   ? 'rt' : '';
-  if(STATE.currentPage==='dashboard') renderDashboard();
-}
-
-/* ── Tab switch ── */
-function switchTab(btn, cls, id){
-  // Deactivate sibling tab buttons
-  if(btn && btn.closest){
-    btn.closest('.tabs-row').querySelectorAll('.tab-btn').forEach(t=>t.classList.remove('active'));
-    btn.classList.add('active');
-  }
-  // Hide all panels in this group
-  document.querySelectorAll('.'+cls).forEach(p=>{
-    p.classList.remove('active');
-    p.style.display = 'none';
-  });
-  // Show target
-  const panel = document.getElementById(id);
-  if(panel){
-    panel.classList.add('active');
-    panel.style.display = 'block';
-  }
-  if(id==='ltab-mine')   renderMyListings();
-  if(id==='ltab-apps')   renderApps();
-  if(id==='ttab-myapps') renderMyApps();
-  if(id==='ttab-browse') renderTenantListings();
-}
-function switchTabById(cls, id){
-  // Find and activate the tab button that targets `id`
-  const btn = document.querySelector(`[onclick*="'${id}'"]`);
-  switchTab(btn, cls, id);
-}
-
-/* ── Wallet ── */
-async function toggleWallet(){
-  if(STATE.wallet.connected){ toast('Connected as '+shortAddr(STATE.wallet.address)); return; }
-  await connectWallet();
-}
-async function connectWallet(){
-  if(!window.ethereum){
-    toast('MetaMask not found — running in demo mode','wrn');
-    seedData(); updateWalletUI(); renderDashboard(); return false;
-  }
-  try {
-    await window.ethereum.request({method:'eth_requestAccounts'});
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    const network  = await provider.getNetwork();
-    if(Number(network.chainId)!==HARDHAT_CHAIN_ID){
-      toast(`Switch MetaMask to Hardhat Local (Chain ID: ${HARDHAT_CHAIN_ID})`,'wrn');
-    }
-    const signer  = await provider.getSigner();
-    const address = await signer.getAddress();
-    const balWei  = await provider.getBalance(address);
-    const balance = parseFloat(ethers.formatEther(balWei)).toFixed(4);
-    const contract = CONTRACT_ADDRESS ? new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer) : null;
-    STATE.wallet   = {address, balance, connected:true, provider, signer};
-    STATE.contract = contract;
-    updateWalletUI();
-    await detectRole(address);
-    await loadContractData();
-    toast('Wallet connected: '+shortAddr(address));
-    return true;
-  } catch(err){
-    toast('Connection failed: '+(err.message||err), 'err'); return false;
-  }
-}
-function updateWalletUI(){
-  const dot  = document.getElementById('w-dot');
-  const addr = document.getElementById('w-addr');
-  const bal  = document.getElementById('w-bal');
-  if(STATE.wallet.connected){
-    dot.style.background = '#34d399';
-    addr.textContent     = shortAddr(STATE.wallet.address);
-    bal.textContent      = STATE.wallet.balance+' ETH';
-  } else if(STATE.demoMode){
-    dot.style.background = '#fbbf24';
-    addr.textContent     = shortAddr(STATE.wallet.address)+' [DEMO]';
-    bal.textContent      = STATE.wallet.balance+' ETH';
-  } else {
-    dot.style.background = '#f87171';
-    addr.textContent     = 'Connect';
-    bal.textContent      = '';
-  }
-}
-async function detectRole(address){
-  try {
-    const res  = await fetch(`${NOTARY_API}/notary/edevlet/${address}`);
-    const data = await res.json();
-    if(data.role==='landlord'){ switchRole('landlord'); showEdevletVerified(data.record?.ad); }
-    else if(data.role==='tenant'){ switchRole('tenant'); showEdevletVerified(data.record?.ad); }
-    else { showEdevletBtn(); openEdevletModal(); }
-  } catch(e){ showEdevletBtn(); }
-}
-function showEdevletBtn(){
-  document.getElementById('edevlet-btn').classList.remove('hidden');
-  document.getElementById('edevlet-verified-badge').classList.add('hidden');
-}
-function showEdevletVerified(name){
-  document.getElementById('edevlet-btn').classList.add('hidden');
-  const badge = document.getElementById('edevlet-verified-badge');
-  badge.classList.remove('hidden');
-  document.getElementById('edevlet-verified-name').textContent = name || 'Doğrulandı';
-}
-function hideEdevletIndicators(){
-  document.getElementById('edevlet-btn').classList.add('hidden');
-  document.getElementById('edevlet-verified-badge').classList.add('hidden');
-}
-
-/* ══════════════════════════════════
-   E-DEVLET KAYIT MODALI
-══════════════════════════════════ */
-function openEdevletModal(){
-  document.getElementById('edevlet-modal-bg').classList.remove('hidden');
-  document.body.style.overflow='hidden';
-  // reset form
-  document.getElementById('edev-ad').value='';
-  document.getElementById('edev-tc').value='';
-  document.getElementById('edev-tapu').value='';
-  document.getElementById('edev-adres').value='';
-  document.getElementById('edev-m2').value='';
-  document.getElementById('edev-gelir').value='';
-  document.getElementById('edev-kredi').value='';
-  document.getElementById('edev-error').style.display='none';
-  selectEdevRole('landlord');
-}
-function closeEdevletModal(){
-  document.getElementById('edevlet-modal-bg').classList.add('hidden');
-  document.body.style.overflow='';
-}
-function selectEdevRole(role){
-  const llCard = document.getElementById('edev-role-ll');
-  const tnCard = document.getElementById('edev-role-tn');
-  const llFields = document.getElementById('edev-landlord-fields');
-  const tnFields = document.getElementById('edev-tenant-fields');
-  if(role==='landlord'){
-    llCard.classList.add('edev-role-card-selected');
-    tnCard.classList.remove('edev-role-card-selected');
-    llFields.classList.remove('hidden');
-    tnFields.classList.add('hidden');
-    llCard.querySelector('input').checked=true;
-  } else {
-    tnCard.classList.add('edev-role-card-selected');
-    llCard.classList.remove('edev-role-card-selected');
-    tnFields.classList.remove('hidden');
-    llFields.classList.add('hidden');
-    tnCard.querySelector('input').checked=true;
-  }
-}
-async function submitEdevletRegistration(e){
-  if(e) e.preventDefault();
-  const errEl = document.getElementById('edev-error');
-  const btn   = document.getElementById('edev-submit-btn');
-  const txt   = document.getElementById('edev-submit-txt');
-  errEl.style.display='none';
-
-  const role = document.querySelector('input[name="edev_role"]:checked')?.value;
-  const ad   = document.getElementById('edev-ad').value.trim();
-  const tc   = document.getElementById('edev-tc').value.trim();
-
-  if(!ad || !tc){ errEl.textContent='Ad Soyad ve TC Kimlik No zorunludur.'; errEl.style.display='block'; return; }
-  if(!/^\d{11}$/.test(tc)){ errEl.textContent='TC Kimlik No 11 haneli rakam olmalıdır.'; errEl.style.display='block'; return; }
-
-  const address = STATE.wallet.address;
-  let payload = { address, role, ad, tcKimlik: tc };
-
-  if(role==='landlord'){
-    const tapuNo   = document.getElementById('edev-tapu').value.trim();
-    const adres    = document.getElementById('edev-adres').value.trim();
-    const tip      = document.getElementById('edev-tip').value;
-    const metrekare= Number(document.getElementById('edev-m2').value);
-    if(!tapuNo||!adres||!metrekare){ errEl.textContent='Tapu No, Adres ve Metrekare alanları zorunludur.'; errEl.style.display='block'; return; }
-    payload.properties = [{ tapuNo, adres, tip, metrekare }];
-  } else {
-    const aylikGelir = Number(document.getElementById('edev-gelir').value);
-    const krediSkoru = Number(document.getElementById('edev-kredi').value);
-    if(isNaN(aylikGelir)||aylikGelir<0){ errEl.textContent='Geçerli bir aylık gelir girin.'; errEl.style.display='block'; return; }
-    if(isNaN(krediSkoru)||krediSkoru<0||krediSkoru>1900){ errEl.textContent='Kredi skoru 0–1900 arasında olmalıdır.'; errEl.style.display='block'; return; }
-    payload.aylikGelir = aylikGelir;
-    payload.krediSkoru = krediSkoru;
-  }
-
-  // submit
-  btn.disabled=true; txt.textContent='Doğrulanıyor...';
-  try {
-    const resp = await fetch(`${NOTARY_API}/notary/edevlet/register`, {
-      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
-    });
-    const data = await resp.json();
-    if(!resp.ok){ errEl.textContent=data.error||'Kayıt başarısız.'; errEl.style.display='block'; btn.disabled=false; txt.textContent='E-Devlet\'e Kaydet →'; return; }
-    closeEdevletModal();
-    switchRole(data.role);
-    showEdevletVerified(ad);
-    toast(`E-Devlet doğrulandı: ${ad} (${data.role==='landlord'?'Ev Sahibi':'Kiracı'})`,'ok');
-  } catch(err){
-    errEl.textContent='Sunucuya bağlanılamadı. Notary çalışıyor mu?'; errEl.style.display='block';
-    btn.disabled=false; txt.textContent='E-Devlet\'e Kaydet →';
-  }
-}
-
-/* ── Demo seed ── */
-function seedData(){
-  STATE.demoMode = true;
-  STATE.wallet   = {address:'0x70997970C51812dc3A010C7d01b50e0d17dc79C8', balance:'9.89', connected:false};
-  STATE.listings = [
-    {adHash:'0xb4a7f2e1…9c3d',type:'rent',address:'Kadıköy, İstanbul',price:0.5,desc:'2BR near ferry terminal',status:'ACTIVE',owner:'0x70997970C51812dc3A010C7d01b50e0d17dc79C8',bond:0.1,policy:['ownership','income'],apps:1,policyId:'0xabc…',reqEscrow:1.5},
-    {adHash:'0xc2f8d3b4…7e1a',type:'sale',address:'Beşiktaş, İstanbul',price:50,desc:'3BR penthouse with Bosphorus view',status:'LOCKED',owner:'0x70997970C51812dc3A010C7d01b50e0d17dc79C8',bond:5,policy:['ownership','lien'],apps:1,policyId:'0xdef…',reqEscrow:150},
-    {adHash:'0xd1e5a6c9…2b8f',type:'rent',address:'Cihangir, İstanbul',price:0.3,desc:'Studio apartment, renovated',status:'SETTLED',owner:'0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc',bond:0.1,policy:['ownership'],apps:1,policyId:'0xabc…',reqEscrow:0.9},
-  ];
-  STATE.applications = [
-    {appId:'0xf1a2b3c4…d5e6',adHash:'0xb4a7f2e1…9c3d',tenant:'0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',type:'rent',escrow:1.5,status:'PENDING_TRANSFER',expiresAt:Date.now()+3600000,proof:true},
-  ];
-}
-
-/* ── Load contract data ── */
-async function loadContractData(){
-  if(!STATE.contract){ return; }
-  STATE.listings=[]; STATE.applications=[];
-  try {
-    const statusNames = ['NONE','ACTIVE','LOCKED','SETTLED','CANCELLED'];
-    const listFilter  = STATE.contract.filters.ListingRegistered();
-    const listEvents  = await STATE.contract.queryFilter(listFilter, 0, 'latest');
-    for(const ev of listEvents){
-      const adHash  = ev.args[0];
-      const listing = await STATE.contract.getListing(adHash);
-      if(Number(listing.status)===0) continue;
-      const meta = JSON.parse(localStorage.getItem('pprev_listing_'+adHash)||'{}');
-      STATE.listings.push({
-        adHash, owner:listing.owner,
-        status:    statusNames[Number(listing.status)]||'NONE',
-        policyId:  listing.policyId,
-        reqEscrow: parseFloat(ethers.formatEther(listing.reqEscrow)),
-        collateral:parseFloat(ethers.formatEther(listing.collateral)),
-        type:   meta.type    || 'rent',
-        address:meta.address || shortAddr(listing.owner)+' property',
-        price:  meta.price   || parseFloat(ethers.formatEther(listing.reqEscrow)),
-        desc:   meta.desc    || '',
-        bond:   parseFloat(ethers.formatEther(listing.collateral)),
-        policy: ['ownership', ...(meta.policies||[])],
-        apps: 0,
-      });
-    }
-    const appStatuses   = ['NONE','PENDING_TRANSFER','SETTLED','EXPIRED'];
-    const appFilter     = STATE.contract.filters.ApplicationCreated();
-    const appEvents     = await STATE.contract.queryFilter(appFilter, 0, 'latest');
-    const expiryTimeout = Number(await STATE.contract.expiryTimeout());
-    for(const ev of appEvents){
-      const appId=ev.args[0], adHash=ev.args[1], applicant=ev.args[2];
-      const app     = await STATE.contract.getApplication(appId);
-      const listing = STATE.listings.find(l=>l.adHash===adHash);
-      if(listing) listing.apps=(listing.apps||0)+1;
-      STATE.applications.push({
-        appId, adHash, tenant:applicant,
-        type:      listing?.type||'rent',
-        escrow:    parseFloat(ethers.formatEther(app.escrowAmount)),
-        status:    appStatuses[Number(app.status)]||'NONE',
-        expiresAt: (Number(app.createdAt)+expiryTimeout)*1000,
-        proof:true,
-      });
-    }
-    if(STATE.currentPage==='dashboard') renderDashboard();
-    if(STATE.currentPage==='listings')  renderListings();
-  } catch(err){
-    console.error('loadContractData:', err);
-    toast('Error loading data: '+err.message, 'err');
-  }
-}
-
-/* ── Notary API ── */
-async function notaryPost(endpoint, body){
-  const res = await fetch(`${NOTARY_API}${endpoint}`,{
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(body),
-  });
-  if(!res.ok){
-    const err = await res.json().catch(()=>({}));
-    throw new Error(err.error||`Notary API error (${res.status})`);
-  }
-  return res.json();
-}
-
-/* ── Render: Listings page ── */
-function renderListings(){
-  const typeF   = document.getElementById('filter-type').value;
-  const statusF = document.getElementById('filter-status').value;
-  const search  = document.getElementById('filter-search').value.toLowerCase();
-  const list = STATE.listings.filter(l=>{
-    if(typeF!=='all'&&l.type!==typeF) return false;
-    if(statusF!=='all'&&l.status!==statusF) return false;
-    if(search&&!l.address.toLowerCase().includes(search)&&!l.adHash.toLowerCase().includes(search)) return false;
-    return true;
-  });
-  const grid = document.getElementById('listings-grid');
-  grid.innerHTML = list.map(l=>`
-    <div class="listing-card" onclick="${STATE.role==='tenant'?`startApply('${l.adHash}')`:``}">
-      <div class="listing-thumb">
-        <div class="listing-thumb-badges">${tbadge(l.type)}${sbadge(l.status)}</div>
-        🏠
-      </div>
-      <div class="listing-info">
-        <h3>${l.address}</h3>
-        <div class="listing-price">${l.price} ETH${l.type==='rent'?'/mo':''}</div>
-        <div class="listing-tags">${l.policy.map(p=>`<span class="chip">${p}</span>`).join('')}</div>
-        <div class="listing-hash">${l.adHash?.slice ? l.adHash.slice(0,22)+'…' : l.adHash}</div>
-        <button class="btn ${STATE.role==='tenant'&&l.status==='ACTIVE'?'btn-primary':'btn-ghost'} btn-sm" style="width:100%;justify-content:center">
-          ${STATE.role==='tenant'&&l.status==='ACTIVE'?'Apply Now':'View Details'}
-        </button>
-      </div>
-    </div>`).join('') ||
-    `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🏘</div><h4>No listings found</h4><p>Connect your wallet or adjust the filters above.</p></div>`;
-}
-
-/* ── Render: Dashboard ── */
-function renderDashboard(){
-  const myAddr = STATE.wallet.address;
-  if(STATE.role==='landlord'){
-    document.getElementById('dash-ll').classList.remove('hidden');
-    document.getElementById('dash-tn').classList.add('hidden');
-    const myL = STATE.listings.filter(l=>addrEq(l.owner,myAddr));
-    document.getElementById('s-active').textContent  = myL.filter(l=>l.status==='ACTIVE').length;
-    document.getElementById('s-apps').textContent    = STATE.applications.filter(a=>myL.some(l=>l.adHash===a.adHash)&&a.status==='PENDING_TRANSFER').length;
-    document.getElementById('s-locked').textContent  = STATE.applications.filter(a=>myL.some(l=>l.adHash===a.adHash)&&a.status==='PENDING_TRANSFER').reduce((s,a)=>s+a.escrow,0).toFixed(2)+' ETH';
-    document.getElementById('s-settled').textContent = myL.filter(l=>l.status==='SETTLED').length;
-    renderMyListings();
-  } else {
-    document.getElementById('dash-ll').classList.add('hidden');
-    document.getElementById('dash-tn').classList.remove('hidden');
-    const myA = STATE.applications.filter(a=>addrEq(a.tenant,myAddr));
-    document.getElementById('ts-apps').textContent     = myA.length;
-    document.getElementById('ts-pending').textContent  = myA.filter(a=>a.status==='PENDING_TRANSFER').length;
-    document.getElementById('ts-escrowed').textContent = myA.filter(a=>a.status==='PENDING_TRANSFER').reduce((s,a)=>s+a.escrow,0).toFixed(2)+' ETH';
-    document.getElementById('ts-settled').textContent  = myA.filter(a=>a.status==='SETTLED').length;
-    renderTenantListings();
-    renderMyApps();
-  }
-}
-function renderMyListings(){
-  const myAddr = STATE.wallet.address;
-  const myL = STATE.listings.filter(l=>addrEq(l.owner,myAddr));
-  document.getElementById('my-listings-body').innerHTML = myL.length
-    ? myL.map(l=>`<tr>
-        <td class="mono" style="font-size:.72rem">${l.adHash?.slice ? l.adHash.slice(0,22)+'…' : l.adHash}</td>
-        <td>${tbadge(l.type)}</td>
-        <td class="mono">${l.price} ETH</td>
-        <td>${sbadge(l.status)}</td>
-        <td>${l.apps||0}</td>
-        <td style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="btn btn-ghost btn-sm" onclick="viewListing('${l.adHash}')">View</button>
-          ${l.status==='ACTIVE'?`<button class="btn btn-danger btn-sm" onclick="doCancelListing('${l.adHash}')">Cancel</button>`:''}
-        </td>
-      </tr>`).join('')
-    : '<tr><td colspan="6"><div class="empty"><div class="empty-icon">📋</div><h4>No listings yet</h4><p>Create your first listing above.</p></div></td></tr>';
-}
-function renderApps(){
-  const myAddr = STATE.wallet.address;
-  const myL  = STATE.listings.filter(l=>addrEq(l.owner,myAddr));
-  const apps = STATE.applications.filter(a=>myL.some(l=>l.adHash===a.adHash));
-  document.getElementById('apps-body').innerHTML = apps.length
-    ? apps.map(a=>`<tr>
-        <td class="mono" style="font-size:.72rem">${a.appId?.slice ? a.appId.slice(0,18)+'…' : a.appId}</td>
-        <td class="mono" style="font-size:.72rem">${a.adHash?.slice ? a.adHash.slice(0,14)+'…' : a.adHash}</td>
-        <td class="mono">${shortAddr(a.tenant)}</td>
-        <td><span style="color:var(--c-green);font-size:.82rem">✓ Notary Attested</span></td>
-        <td class="mono">${a.escrow} ETH</td>
-        <td style="display:flex;gap:6px;flex-wrap:wrap">
-          ${a.status==='PENDING_TRANSFER'
-            ? `<button class="btn btn-green btn-sm" onclick="approveApp('${a.appId}','${a.adHash}')">Settle</button>
-               <button class="btn btn-ghost btn-sm" onclick="doExpireApp('${a.appId}')">Expire</button>`
-            : sbadge(a.status)}
-        </td>
-      </tr>`).join('')
-    : '<tr><td colspan="6"><div class="empty"><div class="empty-icon">📭</div><h4>No applications yet</h4></div></td></tr>';
-}
-function renderMyApps(){
-  const myAddr = STATE.wallet.address;
-  const myA = STATE.applications.filter(a=>addrEq(a.tenant,myAddr));
-  document.getElementById('my-apps-body').innerHTML = myA.length
-    ? myA.map(a=>`<tr>
-        <td class="mono" style="font-size:.72rem">${a.appId?.slice ? a.appId.slice(0,18)+'…' : a.appId}</td>
-        <td class="mono" style="font-size:.72rem">${a.adHash?.slice ? a.adHash.slice(0,14)+'…' : a.adHash}</td>
-        <td>${tbadge(a.type)}</td>
-        <td class="mono">${a.escrow} ETH</td>
-        <td>${sbadge(a.status)}</td>
-        <td>${daysLeft(a.expiresAt)}</td>
-        <td>${a.status==='PENDING_TRANSFER'?`<button class="btn btn-ghost btn-sm" onclick="doExpireApp('${a.appId}')">Expire</button>`:'—'}</td>
-      </tr>`).join('')
-    : '<tr><td colspan="7"><div class="empty"><div class="empty-icon">📭</div><h4>No applications yet</h4></div></td></tr>';
-}
-function renderTenantListings(){
-  const active = STATE.listings.filter(l=>l.status==='ACTIVE');
-  document.getElementById('tenant-listings-grid').innerHTML = active.length
-    ? active.map(l=>`
-        <div class="listing-card" onclick="startApply('${l.adHash}')">
-          <div class="listing-thumb">
-            <div class="listing-thumb-badges">${tbadge(l.type)}${sbadge(l.status)}</div>
-            🏠
-          </div>
-          <div class="listing-info">
-            <h3>${l.address}</h3>
-            <div class="listing-price">${l.price} ETH${l.type==='rent'?'/mo':''}</div>
-            <div class="listing-tags">${l.policy.map(p=>`<span class="chip">${p}</span>`).join('')}</div>
-            <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center">Apply Now</button>
-          </div>
-        </div>`).join('')
-    : '<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🔍</div><h4>No active listings</h4><p>Check back later or connect a landlord wallet.</p></div>';
-}
-
-/* ── Actions ── */
-async function approveApp(appId, adHash){
-  if(STATE.demoMode){ toast('Connect wallet for real settlement','wrn'); return }
-  navigate('settlement'); STATE._settleAppId=appId; STATE._settleAdHash=adHash; goSettle(adHash);
-}
-async function doCancelListing(adHash){
-  if(STATE.demoMode){ toast('Connect wallet','wrn'); return }
-  if(!STATE.contract){ toast('Contract not connected','err'); return }
-  try {
-    toast('Cancelling listing…');
-    const tx = await STATE.contract.cancelListing(adHash);
-    toast('Tx: '+tx.hash.slice(0,14)+'…');
-    await tx.wait(); toast('Listing cancelled, collateral returned');
-    await loadContractData(); renderDashboard();
-  } catch(err){ toast('Cancel failed: '+err.message,'err') }
-}
-async function doExpireApp(appId){
-  if(STATE.demoMode){ toast('Connect wallet','wrn'); return }
-  if(!STATE.contract){ toast('Contract not connected','err'); return }
-  try {
-    toast('Expiring application…');
-    const tx = await STATE.contract.expireApplication(appId);
-    toast('Tx: '+tx.hash.slice(0,14)+'…');
-    await tx.wait(); toast('Expired. Escrow + slash returned to tenant.');
-    await loadContractData(); renderDashboard();
-  } catch(err){ toast('Expire failed: '+err.message,'err') }
-}
-function viewListing(){ navigate('listings') }
-
-/* ── Create Listing Stepper ── */
-function createStep(step){
-  STATE.createStep = step;
-  document.getElementById('stepper-create').querySelectorAll('.step-node').forEach(n=>{
-    const s = parseInt(n.dataset.step);
-    n.classList.toggle('active', s===step);
-    n.classList.toggle('done', s<step);
-  });
-  ['cs1','cs2','cs3','cs4'].forEach((id,i)=>{
-    document.getElementById(id).classList.toggle('hidden', i+1!==step);
-  });
-  if(step===2) runSimOwn();
-  if(step===3) runZkOwn();
-  if(step===4) runVerifyOwn();
-}
-function runSimOwn(){
-  const lines   = document.querySelectorAll('#sim-own .t-line');
-  const meta    = document.getElementById('own-meta');
-  const nextBtn = document.getElementById('own-next-btn');
-  lines.forEach(l=>{
-    l.classList.remove('vis');
-    const check = l.querySelector('.t-check');
-    if(check) check.outerHTML='<div class="t-spinner"></div>';
-  });
-  meta.classList.add('hidden'); nextBtn.classList.add('hidden');
-  lines.forEach((line,i)=>{
-    setTimeout(()=>{
-      line.classList.add('vis');
-      setTimeout(()=>{
-        const spin = line.querySelector('.t-spinner');
-        if(spin){ spin.outerHTML='<div class="t-check">✓</div>' }
-        if(i===lines.length-1){
-          setTimeout(()=>{
-            meta.classList.remove('hidden');
-            document.getElementById('own-nonce').textContent = rHash();
-            document.getElementById('own-ts').textContent    = new Date().toISOString();
-            nextBtn.classList.remove('hidden');
-            toast('E-Devlet ownership check complete ✓');
-          },400);
+      async function loadDeployedAddresses() {
+        try {
+          const res = await fetch("./deployed-addresses.json");
+          if (!res.ok) throw new Error("deployed-addresses.json not found");
+          const j = await res.json();
+          document.getElementById("contractAddr").value = j.pprevSingle || "";
+          STATE.policies = j.policies || {};
+          rebuildPolicyDropdowns();
+          log(`Loaded addresses: contract=${j.pprevSingle?.slice(0, 10)}…, chainId=${j.chainId}`, "ok");
+          if (j.config) {
+            document.getElementById("s-lock").textContent = `${j.config.defaultLockWindow}s`;
+            document.getElementById("s-fresh").textContent = `${j.config.freshnessWindow}s`;
+            document.getElementById("s-mincol").textContent = `${j.config.minCollateral} ETH`;
+          }
+          try {
+            const ni = await fetch(`${STATE.notaryUrl}/notary/info`).then((r) => r.json());
+            STATE.notaryAddress = ni.notaryAddress;
+            document.getElementById("s-notary").textContent = ni.notaryAddress || "—";
+          } catch (e) {
+            log(`Notary info fetch failed: ${e.message}`, "warn");
+          }
+        } catch (e) {
+          log(`Load addresses failed: ${e.message}`, "err");
         }
-      },600);
-    }, parseInt(line.dataset.delay));
-  });
-}
-function runZkOwn(){
-  const bar  = document.getElementById('zk-bar-own');
-  const pct  = document.getElementById('zk-pct-own');
-  const res  = document.getElementById('zk-result-own');
-  const next = document.getElementById('zk-next-own');
-  bar.style.width='0%'; pct.textContent='0%'; res.textContent='pending…'; res.style.color='var(--c-txt3)'; next.classList.add('hidden');
-  document.getElementById('zk-ct-own').textContent      = rHash();
-  document.getElementById('zk-adhash-own').textContent  = rHash();
-  document.getElementById('zk-policy-own').textContent  = 'OWN_RENT_V1';
-  let p=0;
-  const iv=setInterval(()=>{
-    p+=Math.random()*8+2; if(p>100)p=100;
-    bar.style.width=p+'%'; pct.textContent=Math.floor(p)+'%';
-    if(p>=100){ clearInterval(iv); res.textContent='owns_property = TRUE'; res.style.color='var(--c-green)'; next.classList.remove('hidden'); toast('Attestation ready ✓'); }
-  },200);
-}
-function runVerifyOwn(){
-  const items  = document.querySelectorAll('#verify-own .verify-item');
-  const result = document.getElementById('submit-result');
-  const btn    = document.getElementById('submit-done-btn');
-  items.forEach(i=>i.classList.remove('vis')); result.classList.add('hidden'); btn.classList.add('hidden');
-  const addrVal   = document.getElementById('inp-address')?.value||'Istanbul';
-  const typeVal   = document.querySelector('input[name="list-type"]:checked')?.value||'rent';
-  const priceVal  = parseFloat(document.getElementById('inp-price')?.value||'0.5');
-  const descVal   = document.getElementById('inp-desc')?.value||'';
-  const bondVal   = parseFloat(document.getElementById('inp-bond')?.value||'0.1');
-  const escrowVal = parseFloat(document.getElementById('inp-escrow')?.value||'0.05');
-  items.forEach(item=>{ setTimeout(()=>item.classList.add('vis'), parseInt(item.dataset.delay)) });
-  setTimeout(async ()=>{
-    result.classList.remove('hidden');
-    if(!STATE.demoMode && STATE.wallet.connected && STATE.contract){
-      try {
-        const adHash = await realRegisterListing({address:addrVal,type:typeVal,price:priceVal,desc:descVal,bond:bondVal,escrow:escrowVal,policies:[]});
-        document.getElementById('result-adhash').textContent = adHash.slice(0,22)+'…';
-        btn.classList.remove('hidden'); toast('Listing registered on-chain ✓');
-      } catch(err){ result.innerHTML=`<div style="color:var(--c-red)">Error: ${err.message}</div>`; btn.classList.remove('hidden'); toast('Failed: '+err.message,'err'); }
-    } else {
-      document.getElementById('result-adhash').textContent = rHash(); btn.classList.remove('hidden'); toast('Demo: Listing simulated');
-    }
-  },3000);
-}
-async function finishCreate(){
-  if(!STATE.demoMode){ await loadContractData(); }
-  else {
-    STATE.listings.unshift({
-      adHash:rHash(), type:document.querySelector('input[name="list-type"]:checked')?.value||'rent',
-      address:document.getElementById('inp-address')?.value||'Istanbul',
-      price:parseFloat(document.getElementById('inp-price')?.value||'0.5'),
-      desc:document.getElementById('inp-desc')?.value||'', status:'ACTIVE',
-      owner:STATE.wallet.address||'0x0', bond:0.1, policy:['ownership'], apps:0, policyId:'demo',
-      reqEscrow:parseFloat(document.getElementById('inp-escrow')?.value||'0.05'),
-    });
-  }
-  switchTabById('ltab','ltab-mine');
-  renderDashboard(); toast('Listing is now ACTIVE');
-}
+      }
 
-/* ── Apply Flow ── */
-function startApply(adHash){
-  const l = STATE.listings.find(x=>x.adHash===adHash);
-  if(!l||l.status!=='ACTIVE'){ toast('Listing not available','wrn'); return }
-  STATE.applyTarget = l;
-  if(STATE.role!=='tenant') switchRole('tenant');
-  navigate('dashboard');
-  setTimeout(()=>{
-    document.getElementById('tbrowse-grid').classList.add('hidden');
-    document.getElementById('tbrowse-flow').classList.remove('hidden');
-    document.getElementById('apply-review').innerHTML = `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-        <div class="stat-card"><div class="s-lbl">Type</div><div class="s-val" style="font-size:1.1rem">${tbadge(l.type)}</div></div>
-        <div class="stat-card"><div class="s-lbl">Price</div><div class="s-val">${l.price} ETH${l.type==='rent'?'/mo':''}</div></div>
-        <div class="stat-card"><div class="s-lbl">Address</div><div class="s-val" style="font-size:.9rem">${l.address}</div></div>
-        <div class="stat-card"><div class="s-lbl">Required Escrow</div><div class="s-val">${l.reqEscrow} ETH</div></div>
-      </div>
-      <div style="padding:16px;border-radius:var(--radius-lg);background:var(--c-bg);border:1px solid var(--c-border)">
-        <div style="font-family:var(--mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--c-txt3);margin-bottom:10px">Required Attestations</div>
-        ${l.policy.map(p=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:.85rem"><span style="color:var(--c-indigo)">▸</span>${p==='ownership'?'Property Ownership (E-Devlet)':p==='income'?'Income Eligibility (E-Devlet/SGK)':p}</div>`).join('')}
-      </div>`;
-    applyStep(1);
-  },80);
-}
-function cancelApply(){
-  document.getElementById('tbrowse-grid').classList.remove('hidden');
-  document.getElementById('tbrowse-flow').classList.add('hidden');
-  STATE.applyTarget = null;
-}
-function applyStep(step){
-  STATE.applyStep = step;
-  document.getElementById('stepper-apply').querySelectorAll('.step-node').forEach(n=>{
-    const s = parseInt(n.dataset.step);
-    n.classList.toggle('active', s===step);
-    n.classList.toggle('done', s<step);
-  });
-  ['as1','as2','as3','as4'].forEach((id,i)=>{
-    document.getElementById(id).classList.toggle('hidden', i+1!==step);
-  });
-  if(step===2) runSimElig();
-  if(step===3) runZkElig();
-  if(step===4) runVerifyElig();
-}
-function runSimElig(){
-  const lines   = document.querySelectorAll('#sim-elig .t-line');
-  const meta    = document.getElementById('elig-meta');
-  const nextBtn = document.getElementById('elig-next-btn');
-  lines.forEach(l=>{
-    l.classList.remove('vis');
-    const check = l.querySelector('.t-check');
-    if(check) check.outerHTML='<div class="t-spinner"></div>';
-  });
-  meta.classList.add('hidden'); nextBtn.classList.add('hidden');
-  lines.forEach((line,i)=>{
-    setTimeout(()=>{
-      line.classList.add('vis');
-      setTimeout(()=>{
-        const spin = line.querySelector('.t-spinner');
-        if(spin){ spin.outerHTML='<div class="t-check">✓</div>' }
-        if(i===lines.length-1){
-          setTimeout(()=>{
-            meta.classList.remove('hidden');
-            document.getElementById('elig-nonce').textContent = rHash();
-            document.getElementById('elig-ts').textContent    = new Date().toISOString();
-            nextBtn.classList.remove('hidden'); toast('Eligibility check complete ✓');
-          },400);
+      function rebuildPolicyDropdowns() {
+        const fill = (id, fn) => {
+          const el = document.getElementById(id);
+          el.innerHTML = "";
+          for (const [key, hash] of Object.entries(STATE.policies)) {
+            if (!fn(key)) continue;
+            const opt = document.createElement("option");
+            opt.value = hash; opt.textContent = key;
+            el.appendChild(opt);
+          }
+        };
+        fill("reg-pol-r", (k) => k.includes("ownership"));
+        fill("reg-pol-a", (k) => k.includes("eligibility"));
+        fill("reg-pol-s", (k) => k.includes("settlement"));
+      }
+
+      async function connectWallet() {
+        if (!window.ethereum) { log("MetaMask not installed", "err"); return; }
+        try {
+          STATE.provider = new ethers.BrowserProvider(window.ethereum);
+          const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+          STATE.signer = await STATE.provider.getSigner();
+          const net = await STATE.provider.getNetwork();
+          document.getElementById("s-account").textContent = accounts[0];
+          document.getElementById("s-chain").textContent = net.chainId.toString();
+          document.getElementById("hdr-meta").textContent =
+            `${accounts[0].slice(0, 6)}…${accounts[0].slice(-4)} • chain ${net.chainId}`;
+          const addr = document.getElementById("contractAddr").value;
+          if (addr) {
+            STATE.contract = new ethers.Contract(addr, ABI, STATE.signer);
+            STATE.contractAddr = addr;
+            try {
+              const [fw, dl, mc] = await Promise.all([
+                STATE.contract.freshnessWindow(),
+                STATE.contract.defaultLockWindow(),
+                STATE.contract.minCollateral()
+              ]);
+              document.getElementById("s-fresh").textContent = `${fw}s`;
+              document.getElementById("s-lock").textContent = `${dl}s`;
+              document.getElementById("s-mincol").textContent = ethers.formatEther(mc) + " ETH";
+            } catch (e) {
+              log(`Contract introspection failed: ${e.message}`, "warn");
+            }
+          }
+          log(`Connected: ${accounts[0]}`, "ok");
+        } catch (e) {
+          log(`Connect failed: ${e.message}`, "err");
         }
-      },600);
-    }, parseInt(line.dataset.delay));
-  });
-}
-function runZkElig(){
-  const bar  = document.getElementById('zk-bar-elig');
-  const pct  = document.getElementById('zk-pct-elig');
-  const res  = document.getElementById('zk-result-elig');
-  const next = document.getElementById('zk-next-elig');
-  bar.style.width='0%'; pct.textContent='0%'; res.textContent='pending…'; res.style.color='var(--c-txt3)'; next.classList.add('hidden');
-  document.getElementById('zk-ct-elig').textContent     = rHash();
-  document.getElementById('zk-adhash-elig').textContent = STATE.applyTarget?.adHash?.slice(0,22)||rHash();
-  document.getElementById('zk-policy-elig').textContent = 'OWN_RENT_V1';
-  let p=0;
-  const iv=setInterval(()=>{
-    p+=Math.random()*7+2; if(p>100)p=100;
-    bar.style.width=p+'%'; pct.textContent=Math.floor(p)+'%';
-    if(p>=100){ clearInterval(iv); res.textContent='income ≥ threshold = TRUE'; res.style.color='var(--c-green)'; next.classList.remove('hidden'); toast('Eligibility attestation ready ✓'); }
-  },200);
-}
-function runVerifyElig(){
-  const items  = document.querySelectorAll('#verify-elig .verify-item');
-  const result = document.getElementById('apply-result');
-  const btn    = document.getElementById('apply-done-btn');
-  items.forEach(i=>i.classList.remove('vis')); result.classList.add('hidden'); btn.classList.add('hidden');
-  items.forEach(item=>{ setTimeout(()=>item.classList.add('vis'), parseInt(item.dataset.delay)) });
-  setTimeout(async ()=>{
-    result.classList.remove('hidden');
-    if(!STATE.demoMode && STATE.wallet.connected && STATE.contract && STATE.applyTarget){
-      try {
-        await realApplyToListing(STATE.applyTarget);
-        document.getElementById('apply-appid').textContent = 'See blockchain';
-        btn.classList.remove('hidden');
-      } catch(err){ result.innerHTML=`<div style="color:var(--c-red)">${err.message}</div>`; btn.classList.remove('hidden'); toast('Failed: '+err.message,'err'); }
-    } else {
-      document.getElementById('apply-appid').textContent = rHash(); btn.classList.remove('hidden'); toast('Demo: Application simulated');
-    }
-  },3600);
-}
-async function finishApply(){
-  if(!STATE.demoMode){ await loadContractData(); }
-  else if(STATE.applyTarget){
-    const l = STATE.listings.find(x=>x.adHash===STATE.applyTarget.adHash);
-    if(l){ l.status='LOCKED'; l.apps++ }
-    STATE.applications.unshift({appId:rHash(),adHash:STATE.applyTarget.adHash,tenant:STATE.wallet.address,type:STATE.applyTarget.type,escrow:STATE.applyTarget.reqEscrow,status:'PENDING_TRANSFER',expiresAt:Date.now()+3600000,proof:true});
-  }
-  cancelApply();
-  switchTabById('ttab','ttab-myapps');
-  renderDashboard();
-}
+      }
 
-/* ── Settlement ── */
-function goSettle(adHash){
-  navigate('settlement');
-  const l = STATE.listings.find(x=>x.adHash===adHash);
-  const a = STATE.applications.find(x=>x.adHash===adHash&&x.status==='PENDING_TRANSFER');
-  const phases = ['Advertise','Register','Apply','Engage','Settle'];
-  const cur = l?.status==='SETTLED'?5:4;
-  document.getElementById('settle-timeline').innerHTML = phases.map((p,i)=>{
-    const cls = i<cur-1?'done':i===cur-1?'cur':'';
-    return `<div class="tl-node ${cls}"><div class="tl-dot">${i<cur-1?'✓':i+1}</div><div><div class="tl-label">${p}</div><div class="tl-sub">${['Ad_Hash','π_own','π_elig','Escrow','π_trans'][i]}</div></div></div>`;
-  }).join('');
-  if(a){
-    document.getElementById('settle-dep').textContent      = a.escrow+' ETH';
-    document.getElementById('settle-bond').textContent     = (l?.bond||0.1)+' ETH';
-    document.getElementById('settle-total').textContent    = (a.escrow+(l?.bond||0.1)).toFixed(2)+' ETH';
-    document.getElementById('settle-countdown').textContent= daysLeft(a.expiresAt);
-    document.getElementById('settle-expires').textContent  = new Date(a.expiresAt).toISOString().slice(0,10);
-    STATE._settleAppId=a.appId; STATE._settleAdHash=adHash;
-  }
-  document.getElementById('settle-proof-section').classList.add('hidden');
-  document.getElementById('settle-final').classList.add('hidden');
-}
-function confirmSettlement(role){
-  toast(role+' confirmed transfer');
-  document.getElementById('settle-proof-section').classList.remove('hidden');
-  const lines = document.querySelectorAll('#sim-trans .t-line');
-  lines.forEach(l=>l.classList.remove('vis'));
-  document.getElementById('settle-final').classList.add('hidden');
-  lines.forEach((line,i)=>{
-    setTimeout(()=>{
-      line.classList.add('vis');
-      setTimeout(()=>{
-        const spin = line.querySelector('.t-spinner');
-        if(spin) spin.outerHTML='<div class="t-check">✓</div>';
-        if(i===lines.length-1){
-          setTimeout(async ()=>{
-            document.getElementById('settle-final').classList.remove('hidden');
-            if(!STATE.demoMode && STATE.wallet.connected && STATE.contract && STATE._settleAppId){
-              try { await realSettleListing(STATE._settleAppId, STATE._settleAdHash); await loadContractData(); }
-              catch(err){ toast('Settlement failed: '+err.message,'err') }
-            } else { toast('Demo: Settlement complete (simulated)') }
-          },500);
+      async function doRegister() {
+        try {
+          STATE.notaryUrl = document.getElementById("notaryUrl").value;
+          if (!STATE.contract) throw new Error("Connect wallet first");
+          const txDataStr = document.getElementById("reg-txdata").value;
+          const txData = ethers.toUtf8Bytes(txDataStr);
+          const policyIdR = document.getElementById("reg-pol-r").value;
+          const policyIdA = document.getElementById("reg-pol-a").value;
+          const policyIdS = document.getElementById("reg-pol-s").value;
+          const salt = ethers.keccak256(ethers.toUtf8Bytes(`salt-${Date.now()}-${Math.random()}`));
+          const nonce = ethers.keccak256(ethers.toUtf8Bytes(`nonce-reg-${Date.now()}-${Math.random()}`));
+          const reqEscrow = ethers.parseEther(document.getElementById("reg-escrow").value);
+          const collateral = ethers.parseEther(document.getElementById("reg-collateral").value);
+          const proverAddress = await STATE.signer.getAddress();
+          const timestamp = Math.floor(Date.now() / 1000);
+
+          log("Requesting σ_R from notary…");
+          const res = await fetch(`${STATE.notaryUrl}/notary/attest-register`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              proverAddress, txData: ethers.hexlify(txData),
+              policyIdR, policyIdA, policyIdS, salt, nonce, timestamp,
+              contractAddress: STATE.contractAddr
+            })
+          });
+          if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+          const { signature, txID } = await res.json();
+          log(`σ_R received • txID=${txID.slice(0, 14)}…`, "ok");
+
+          const tx = await STATE.contract.register(
+            txData, policyIdR, policyIdA, policyIdS, salt,
+            reqEscrow, nonce, timestamp, signature,
+            { value: collateral }
+          );
+          log(`register() submitted, tx=${tx.hash.slice(0, 14)}…`);
+          await tx.wait();
+          log(`Registered. Listing ${txID} is ACTIVE.`, "ok");
+          document.getElementById("apply-txid").value = txID;
+          document.getElementById("cancel-txid").value = txID;
+        } catch (e) {
+          log(`Register failed: ${e.message || e}`, "err");
         }
-      },500);
-    }, parseInt(line.dataset.delay));
-  });
-}
-function raiseDispute(role){ toast(role+' raised a dispute ⚠','wrn') }
+      }
 
-/* ── Real Transactions ── */
-async function realRegisterListing(f){
-  const adHash = ethers.keccak256(ethers.toUtf8Bytes(f.address+f.type+f.desc+Date.now()+Math.random()));
-  const policyKey = 'OWN_'+(f.type||'rent').toUpperCase()+'_V1';
-  const policyId  = CONTRACT_POLICIES[policyKey]||ethers.keccak256(ethers.toUtf8Bytes(policyKey));
-  const transcriptCommitment = ethers.keccak256(ethers.toUtf8Bytes('ll-transcript-'+STATE.wallet.address+Date.now()));
-  const timestamp = Math.floor(Date.now()/1000);
-  const nonce = ethers.keccak256(ethers.toUtf8Bytes('nonce-reg-'+Date.now()+Math.random()));
-  const reqEscrow  = ethers.parseEther(String(f.escrow||0.05));
-  const collateral = ethers.parseEther(String(f.bond||0.1));
-  toast('Requesting notary attestation…');
-  const attest = await notaryPost('/notary/attest-listing',{landlordAddress:STATE.wallet.address,adHash,policyId,transcriptCommitment,timestamp,nonce});
-  if (!attest.signature) throw new Error('Notary did not return a signature');
-  toast('Submitting transaction…');
-  const tx = await STATE.contract.registerListing(adHash,policyId,reqEscrow,transcriptCommitment,timestamp,nonce,"0x",[],attest.signature,{value:collateral});
-  toast('Tx: '+tx.hash.slice(0,14)+'…');
-  await tx.wait();
-  localStorage.setItem('pprev_listing_'+adHash,JSON.stringify({type:f.type,address:f.address,price:f.price,desc:f.desc,policies:f.policies||[]}));
-  return adHash;
-}
-async function realApplyToListing(listing){
-  const transcriptCommitment = ethers.keccak256(ethers.toUtf8Bytes('tn-transcript-'+STATE.wallet.address+Date.now()));
-  const timestamp = Math.floor(Date.now()/1000);
-  const nonce = ethers.keccak256(ethers.toUtf8Bytes('nonce-app-'+Date.now()+Math.random()));
-  toast('Requesting eligibility attestation…');
-  const attest = await notaryPost('/notary/attest-application',{tenantAddress:STATE.wallet.address,adHash:listing.adHash,policyId:listing.policyId,transcriptCommitment,timestamp,nonce,reqEscrowEth:listing.reqEscrow});
-  if (!attest.signature) throw new Error('Notary did not return a signature');
-  toast('Submitting transaction…');
-  const tx = await STATE.contract.applyToListing(listing.adHash,listing.policyId,transcriptCommitment,timestamp,nonce,"0x",[],attest.signature,{value:ethers.parseEther(String(listing.reqEscrow||0.05))});
-  toast('Tx: '+tx.hash.slice(0,14)+'…');
-  await tx.wait(); return true;
-}
-async function realSettleListing(appId, adHash){
-  const transcriptCommitment = ethers.keccak256(ethers.toUtf8Bytes('settle-'+appId+Date.now()));
-  const timestamp = Math.floor(Date.now()/1000);
-  const nonce = ethers.keccak256(ethers.toUtf8Bytes('nonce-settle-'+Date.now()+Math.random()));
-  toast('Requesting settlement attestation…');
-  const attest = await notaryPost('/notary/attest-settlement',{landlordAddress:STATE.wallet.address,appId,transcriptCommitment,timestamp,nonce});
-  if (!attest.signature) throw new Error('Notary did not return a signature');
-  toast('Submitting settlement…');
-  const tx = await STATE.contract.settleListing(appId,transcriptCommitment,timestamp,nonce,"0x",[],attest.signature);
-  toast('Tx: '+tx.hash.slice(0,14)+'…');
-  await tx.wait(); toast('Settled ✓ Funds released'); return true;
-}
+      async function doApply() {
+        try {
+          if (!STATE.contract) throw new Error("Connect wallet first");
+          const txID = document.getElementById("apply-txid").value.trim();
+          if (!txID) throw new Error("Need txID");
+          const deposit = ethers.parseEther(document.getElementById("apply-deposit").value);
+          const applicantAddress = await STATE.signer.getAddress();
+          const timestamp = Math.floor(Date.now() / 1000);
+          const nonce = ethers.keccak256(ethers.toUtf8Bytes(`nonce-app-${Date.now()}-${Math.random()}`));
+          const listing = await STATE.contract.getListing(txID);
+          const policyIdA = listing.policyId_A;
 
-/* ── Protocol Visualizer ── */
-const VIZ_STEPS=[
-  {id:1,title:'Ownership Data Request',from:'landlord',to:'edevlet',desc:'Landlord queries E-Devlet for property ownership records via HTTPS, embedding a fresh nonce.',formula:'P queries S with embedded nonce',priv:['Query parameters','Personal identity'],pub:['Server URL (E-Devlet)','Nonce']},
-  {id:2,title:'Ownership Data Response',from:'edevlet',to:'landlord',desc:'E-Devlet returns the ownership record over the TLS-secured channel.',formula:'S returns ownership record to P',priv:['Full registry extract','Co-owner identities'],pub:['HTTP response metadata']},
-  {id:3,title:'TLSNotary Proof for Ownership',from:'landlord',to:'notary',desc:'Landlord initiates MPC-TLS session with Notary Network to produce an authenticated transcript.',formula:'T_proof ← MPC-TLS(P, S, N)',priv:['Plaintext content of T_proof'],pub:['C_T = Commit(T_proof)','t_auth (timestamp)']},
-  {id:4,title:'Notary ECDSA Signature',from:'notary',to:'landlord',desc:'Notary verifies the TLSNotary proof and produces an ECDSA signature over the binding tuple.',formula:'σ ← notaryWallet.signMessage(m)\nm = keccak256(adHash‖policyId‖C_T‖t_auth‖nonce)',priv:['Notary private key sk_N'],pub:['σ (ECDSA signature)','m (binding tuple hash)']},
-  {id:5,title:'Register Listing On-Chain',from:'landlord',to:'contract',desc:'SC_PPREV verifies σ via ecrecover, checks freshness window, nonce uniqueness, and collateral. Listing → ACTIVE.',formula:'ecrecover(ethHash(m), σ) == notaryAddress\n∧ (now − t_auth ≤ Δ) ∧ NonceUnused(nonce)\n∧ msg.value ≥ minCollateral',priv:['None'],pub:['adHash','Status = ACTIVE','Collateral locked']},
-  {id:6,title:'Publish Listing',from:'contract',to:'tenant',desc:'Listing becomes visible on-chain via ListingRegistered event. Tenant discovers it.',formula:'event ListingRegistered(adHash, owner, policyId, reqEscrow, collateral)',priv:['None'],pub:['adHash','policyId','reqEscrow']},
-  {id:7,title:'Eligibility Data Request',from:'tenant',to:'edevlet',desc:'Tenant queries E-Devlet/SGK for income and employment records.',formula:'T queries S with embedded nonce_T',priv:['Tenant identity'],pub:['Server URL','nonce_T']},
-  {id:8,title:'Eligibility Data Response',from:'edevlet',to:'tenant',desc:'Source returns income/employment records over TLS.',formula:'S returns eligibility record to T',priv:['Income amount','Employment details'],pub:['HTTP response metadata']},
-  {id:9,title:'TLSNotary Proof for Eligibility',from:'tenant',to:'notary',desc:'Tenant runs MPC-TLS with Notary Network for eligibility transcript.',formula:'T_proof_elig ← MPC-TLS(T, S, N)',priv:['Plaintext eligibility data'],pub:['C_T_elig','t_auth_T']},
-  {id:10,title:'Notary Signs Eligibility',from:'notary',to:'tenant',desc:'Notary verifies income ≥ threshold off-chain and signs the tenant-bound tuple.',formula:'σ_T ← notaryWallet.signMessage(m_T)\nm_T = keccak256(adHash‖policyId‖C_T_elig‖t_T‖nonce_T)',priv:['Notary private key'],pub:['σ_T','m_T']},
-  {id:11,title:'Submit Application + Escrow',from:'tenant',to:'contract',desc:'Tenant submits σ_T and escrow deposit in a single atomic transaction.',formula:'applyToListing(adHash, policyId, C_T, t, nonce, σ_T) { value: reqEscrow }',priv:['None'],pub:['appId','escrowAmount locked']},
-  {id:12,title:'Verify Signature & Lock',from:'contract',to:'contract',desc:'Contract verifies ECDSA sig, freshness, nonce, escrow. Listing → LOCKED.',formula:'ecrecover(ethHash(m_T), σ_T) == notaryAddress\n∧ msg.value ≥ reqEscrow ∧ NonceUnused',priv:['None'],pub:['Status = LOCKED','Application = PENDING_TRANSFER']},
-  {id:13,title:'Transfer Proof (π_trans)',from:'landlord',to:'escrow',desc:'After key handover, landlord requests settlement attestation from Notary.',formula:'σ_s ← notaryWallet.signMessage(m_s)\nm_s = keccak256(appId‖C_T_s‖t_s‖nonce_s)',priv:['None'],pub:['σ_s','settlement confirmation']},
-  {id:14,title:'Settlement & Escrow Release',from:'escrow',to:'landlord',desc:'SC_PPREV verifies σ_s, transitions to SETTLED, releases escrow + collateral to landlord.',formula:'settleListing(appId, C_T, t, nonce, σ)\n→ transfer(escrow + collateral → landlord)',priv:['None'],pub:['SETTLED state','Funds released']},
-  {id:15,title:'Expiration & Slashing',from:'escrow',to:'tenant',desc:'If landlord misses deadline, anyone calls expireApplication. Tenant gets escrow + 10% slash from collateral.',formula:'expireApplication(appId)\n→ tenant receives escrow + (collateral × 10%)\n→ listing → ACTIVE again',priv:['None'],pub:['EXPIRED state','slashAmount → tenant']},
-];
-const ACTOR_MAP={tenant:'va-tenant',landlord:'va-landlord',edevlet:'va-edevlet',notary:'va-notary',contract:'va-contract',escrow:'va-escrow'};
+          log("Requesting σ_A from notary…");
+          const res = await fetch(`${STATE.notaryUrl}/notary/attest-apply`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              applicantAddress, txID, policyIdA, nonce, timestamp,
+              contractAddress: STATE.contractAddr
+            })
+          });
+          if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+          const { signature } = await res.json();
+          log("σ_A received", "ok");
 
-function renderVizStep(){
-  const step = VIZ_STEPS[STATE.vizStep-1];
-  document.getElementById('viz-lbl').textContent     = `Step ${step.id} / ${VIZ_STEPS.length}`;
-  document.getElementById('viz-prog').style.width    = (step.id/VIZ_STEPS.length*100)+'%';
-  document.getElementById('viz-title').textContent   = `Step ${step.id}: ${step.title}`;
-  document.getElementById('viz-desc').textContent    = step.desc;
-  document.getElementById('viz-formula').innerHTML   = step.formula.replace(/\n/g,'<br>');
-  document.getElementById('viz-prv').innerHTML       = step.priv.map(p=>`<li>${p}</li>`).join('');
-  document.getElementById('viz-pub').innerHTML       = step.pub.map(p=>`<li>${p}</li>`).join('');
-  document.querySelectorAll('.viz-actor').forEach(a=>a.classList.remove('hi'));
-  if(ACTOR_MAP[step.from]) document.querySelector('.'+ACTOR_MAP[step.from])?.classList.add('hi');
-  if(ACTOR_MAP[step.to]&&step.to!==step.from) document.querySelector('.'+ACTOR_MAP[step.to])?.classList.add('hi');
-  drawVizArrow(step);
-}
-function drawVizArrow(step){
-  const svg  = document.getElementById('viz-svg');
-  const cont = document.getElementById('viz-stage');
-  const cr   = cont.getBoundingClientRect();
-  svg.setAttribute('width',cr.width); svg.setAttribute('height',cr.height);
-  const fromEl = cont.querySelector('.'+ACTOR_MAP[step.from]);
-  const toEl   = cont.querySelector('.'+ACTOR_MAP[step.to]);
-  if(!fromEl||!toEl||step.from===step.to){ svg.innerHTML=''; return }
-  const fr=fromEl.getBoundingClientRect(), tr=toEl.getBoundingClientRect();
-  const x1=fr.left-cr.left+fr.width/2, y1=fr.top-cr.top+fr.height/2;
-  const x2=tr.left-cr.left+tr.width/2, y2=tr.top-cr.top+tr.height/2;
-  svg.innerHTML=`
-    <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-      <path d="M0,0 L0,6 L8,3 z" fill="#818cf8"/>
-    </marker></defs>
-    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-      stroke="#818cf8" stroke-width="2" stroke-dasharray="6 3"
-      marker-end="url(#ah)">
-      <animate attributeName="stroke-dashoffset" from="18" to="0" dur=".8s" repeatCount="indefinite"/>
-    </line>`;
-}
-function vizPrev(){ if(STATE.vizStep>1){ STATE.vizStep--; renderVizStep() } }
-function vizNext(){ if(STATE.vizStep<VIZ_STEPS.length){ STATE.vizStep++; renderVizStep() } }
-function vizAutoPlay(){
-  if(STATE.vizPlaying){
-    STATE.vizPlaying=false; document.getElementById('viz-auto-btn').textContent='▶ Auto-Play'; return;
-  }
-  STATE.vizPlaying=true; document.getElementById('viz-auto-btn').textContent='⏸ Pause';
-  STATE.vizStep=1; renderVizStep();
-  const iv=setInterval(()=>{
-    if(!STATE.vizPlaying||STATE.vizStep>=VIZ_STEPS.length){ clearInterval(iv); STATE.vizPlaying=false; document.getElementById('viz-auto-btn').textContent='▶ Auto-Play'; return }
-    STATE.vizStep++; renderVizStep();
-  },2500);
-}
+          const tx = await STATE.contract.applyTx(txID, nonce, timestamp, signature,
+            { value: deposit });
+          log(`applyTx() submitted, tx=${tx.hash.slice(0, 14)}…`);
+          await tx.wait();
+          const appId = ethers.solidityPackedKeccak256(
+            ["bytes32", "address", "bytes32"], [txID, applicantAddress, nonce]
+          );
+          log(`Application created. appId=${appId.slice(0, 14)}…`, "ok");
+          document.getElementById("engage-appid").value = appId;
+        } catch (e) {
+          log(`Apply failed: ${e.message || e}`, "err");
+        }
+      }
 
-/* ══════════════════════════════════
-   LIVE PROTOCOL SIMULATION
-══════════════════════════════════ */
-const SIM_STEPS = [
-  {
-    title: 'Step 1 — Landlord Identity Lookup',
-    body: 'Landlord connects MetaMask. The system queries E-Devlet to confirm property ownership on Kadıköy, İstanbul.',
-    actors: ['sa-landlord','sa-edevlet'],
-    color: 'green',
-    lines: [
-      {tag:'sys', msg:'Wallet connected: <span class="hl">0x70997970C51812dc3A010C7d01b50e0d17dc79C8</span>'},
-      {tag:'sys', msg:'GET /notary/edevlet/0x7099…9C8'},
-      {tag:'dat', msg:'name: <span class="hl">Ahmet Yılmaz</span>'},
-      {tag:'dat', msg:'property: <span class="hl">Kadıköy, İstanbul — IST-2023-001</span>'},
-      {tag:'dat', msg:'role: <span class="grn">landlord</span>'},
-      {tag:'ok',  msg:'E-Devlet identity verified ✓'},
-    ]
-  },
-  {
-    title: 'Step 2 — Notary Ownership Attestation',
-    body: 'The Notary Network fetches the ownership record over TLS, commits it, and signs the binding tuple with its private key.',
-    actors: ['sa-notary','sa-landlord'],
-    color: 'indigo',
-    lines: [
-      {tag:'sys', msg:'POST /notary/attest-listing'},
-      {tag:'dat', msg:'adHash: <span class="ind">0xb4a7f2e19c3d8f12…</span>'},
-      {tag:'dat', msg:'policyId: <span class="ind">OWN_RENT_V1</span>'},
-      {tag:'dat', msg:'C_T: <span class="ind">0x9a3f7c2e4d1b8a56…</span>'},
-      {tag:'dat', msg:'timestamp: <span class="hl">1712506032</span>  nonce: <span class="ind">0xf2a3b1…</span>'},
-      {tag:'sys', msg:'m = keccak256(adHash‖policyId‖C_T‖t‖nonce)'},
-      {tag:'sig', msg:'σ = notaryWallet.signMessage(m)'},
-      {tag:'sig', msg:'<span class="vlt">0x8f2e4a9c1b7d3f56e20d8a4c7b3f1e9d2a5c8b4f…</span>'},
-      {tag:'ok',  msg:'Ownership attestation signed ✓'},
-    ]
-  },
-  {
-    title: 'Step 3 — On-Chain Registration',
-    body: 'The contract runs ecrecover on the signature, checks freshness + nonce, locks 0.1 ETH collateral. Listing → ACTIVE.',
-    actors: ['sa-contract','sa-landlord'],
-    color: 'amber',
-    lines: [
-      {tag:'tx',  msg:'registerListing() called'},
-      {tag:'dat', msg:'msg.sender: <span class="hl">0x7099…9C8</span>'},
-      {tag:'dat', msg:'msg.value:  <span class="amb">0.1 ETH</span>  (collateral)'},
-      {tag:'sys', msg:'ecrecover(ethHash(m), σ) → <span class="grn">0xa0Ee7A14…</span>'},
-      {tag:'sys', msg:'signer == notaryAddress → <span class="grn">TRUE</span>'},
-      {tag:'sys', msg:'now − t_auth = 12s ≤ 300s → <span class="grn">FRESH</span>'},
-      {tag:'sys', msg:'NonceUnused(nonce) → <span class="grn">TRUE</span>'},
-      {tag:'sys', msg:'msg.value ≥ minCollateral → <span class="grn">TRUE</span>'},
-      {tag:'ok',  msg:'ListingRegistered(adHash, owner, policyId) emitted'},
-      {tag:'ok',  msg:'Listing status → <span class="grn">ACTIVE</span> ✓  block #728'},
-    ]
-  },
-  {
-    title: 'Step 4 — Tenant Eligibility Check',
-    body: 'Tenant connects. Notary verifies income ≥ 20,000 TRY/mo from E-Devlet/SGK. Income figure stays private — only the predicate result is used.',
-    actors: ['sa-tenant','sa-edevlet','sa-notary'],
-    color: 'indigo',
-    lines: [
-      {tag:'sys', msg:'Wallet connected: <span class="hl">0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC</span>'},
-      {tag:'sys', msg:'GET /notary/edevlet/0x3C44…3BC'},
-      {tag:'dat', msg:'name: <span class="hl">Zeynep Arslan</span>  role: <span class="ind">tenant</span>'},
-      {tag:'dat', msg:'income: <span class="red">████████</span>  (private — never on-chain)'},
-      {tag:'sys', msg:'POST /notary/attest-application'},
-      {tag:'sys', msg:'income ≥ minTenantIncome (20000) → <span class="grn">TRUE</span>'},
-      {tag:'sig', msg:'σ_T = notaryWallet.signMessage(m_T)'},
-      {tag:'ok',  msg:'Eligibility attestation signed ✓'},
-    ]
-  },
-  {
-    title: 'Step 5 — Application + Escrow Deposit',
-    body: 'Tenant submits applyToListing() with ECDSA attestation and 0.05 ETH escrow in one atomic tx. Listing flips to LOCKED.',
-    actors: ['sa-contract','sa-tenant'],
-    color: 'green',
-    lines: [
-      {tag:'tx',  msg:'applyToListing() called'},
-      {tag:'dat', msg:'msg.sender: <span class="hl">0x3C44…3BC</span>'},
-      {tag:'dat', msg:'msg.value:  <span class="amb">0.05 ETH</span>  (escrow)'},
-      {tag:'sys', msg:'ecrecover(ethHash(m_T), σ_T) → <span class="grn">0xa0Ee7A14…</span>'},
-      {tag:'sys', msg:'Freshness + nonce + escrow ≥ reqEscrow → <span class="grn">ALL PASS</span>'},
-      {tag:'ok',  msg:'ApplicationCreated(appId, adHash, tenant) emitted'},
-      {tag:'ok',  msg:'Application → <span class="grn">PENDING_TRANSFER</span>'},
-      {tag:'ok',  msg:'Listing → <span class="amb">LOCKED</span>  (reserved for tenant) ✓'},
-    ]
-  },
-  {
-    title: 'Step 6 — Settlement & Fund Release',
-    body: 'After key handover, landlord calls settleListing(). Escrow + collateral are released. If landlord delays past deadline, tenant triggers expiry and receives a 10% slash bonus.',
-    actors: ['sa-contract','sa-landlord','sa-tenant'],
-    color: 'green',
-    lines: [
-      {tag:'tx',  msg:'settleListing() called by landlord'},
-      {tag:'sys', msg:'ecrecover(σ_settle) → notaryAddress ✓'},
-      {tag:'sys', msg:'transfer <span class="amb">0.15 ETH</span> → <span class="hl">0x7099…9C8</span> (landlord)'},
-      {tag:'ok',  msg:'Application → <span class="grn">SETTLED</span>  Listing → <span class="grn">SETTLED</span>'},
-      {tag:'sys', msg:'— OR — if deadline missed:'},
-      {tag:'tx',  msg:'expireApplication() called by tenant'},
-      {tag:'sys', msg:'slashAmount = 0.1 ETH × 10% = <span class="red">0.01 ETH</span>'},
-      {tag:'sys', msg:'transfer <span class="amb">0.06 ETH</span> → <span class="hl">0x3C44…3BC</span> (escrow + slash)'},
-      {tag:'ok',  msg:'Listing → <span class="grn">ACTIVE</span> again  (available for next tenant)'},
-    ]
-  },
-];
+      async function doEngage() {
+        try {
+          if (!STATE.contract) throw new Error("Connect wallet first");
+          const appId = document.getElementById("engage-appid").value.trim();
+          const lockWindow = parseInt(document.getElementById("engage-lock").value || "0", 10);
+          if (!appId) throw new Error("Need appId");
+          const tx = await STATE.contract.engage(appId, lockWindow);
+          log(`engage() submitted, tx=${tx.hash.slice(0, 14)}…`);
+          const rc = await tx.wait();
+          for (const lg of rc.logs) {
+            try {
+              const parsed = STATE.contract.interface.parseLog(lg);
+              if (parsed && parsed.name === "Engaged") {
+                document.getElementById("settle-engid").value = parsed.args[0];
+                log(`Engaged. engId=${parsed.args[0].slice(0, 14)}… expiresAt=${parsed.args[4]}`, "ok");
+                break;
+              }
+            } catch (_) {}
+          }
+        } catch (e) {
+          log(`Engage failed: ${e.message || e}`, "err");
+        }
+      }
 
-let _simTimer = null, _simStep = 0, _simLineIdx = 0, _simRunning = false;
+      async function doSettle() {
+        try {
+          if (!STATE.contract) throw new Error("Connect wallet first");
+          const engId = document.getElementById("settle-engid").value.trim();
+          if (!engId) throw new Error("Need engId");
+          const eng = await STATE.contract.getEngagement(engId);
+          const listing = await STATE.contract.getListing(eng.txID);
+          const policyIdS = listing.policyId_S;
+          const proverAddress = await STATE.signer.getAddress();
+          const timestamp = Math.floor(Date.now() / 1000);
+          const nonce = ethers.keccak256(ethers.toUtf8Bytes(`nonce-settle-${Date.now()}-${Math.random()}`));
 
-function simHighlightActors(actors, color){
-  document.querySelectorAll('.sim-actor').forEach(a=>a.classList.remove('active-actor','active-actor-green'));
-  actors.forEach(id=>{
-    const el = document.getElementById(id);
-    if(el) el.classList.add(color==='green'?'active-actor-green':'active-actor');
-  });
-}
+          log("Requesting σ_S from notary…");
+          const res = await fetch(`${STATE.notaryUrl}/notary/attest-settle`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              proverAddress, engId, txID: eng.txID, policyIdS, nonce, timestamp,
+              contractAddress: STATE.contractAddr
+            })
+          });
+          if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+          const { signature } = await res.json();
+          log("σ_S received", "ok");
 
-function simAppendLine(line){
-  const out = document.getElementById('sim-terminal-output');
-  if(!out) return;
-  const div = document.createElement('div');
-  div.className = 'sl';
-  div.innerHTML = `<span class="tag ${line.tag}">${line.tag.toUpperCase()}</span><span class="msg">${line.msg}</span>`;
-  out.appendChild(div);
-  out.scrollTop = out.scrollHeight;
-}
+          const tx = await STATE.contract.settle(engId, nonce, timestamp, signature);
+          log(`settle() submitted, tx=${tx.hash.slice(0, 14)}…`);
+          await tx.wait();
+          log("Settled. Escrow + collateral released.", "ok");
+        } catch (e) {
+          log(`Settle failed: ${e.message || e}`, "err");
+        }
+      }
 
-function simAppendSep(){
-  const out = document.getElementById('sim-terminal-output');
-  if(!out) return;
-  const div = document.createElement('div');
-  div.className='sl sep'; div.innerHTML='';
-  out.appendChild(div);
-}
+      async function doExpire() {
+        try {
+          if (!STATE.contract) throw new Error("Connect wallet first");
+          const engId = document.getElementById("settle-engid").value.trim();
+          if (!engId) throw new Error("Need engId");
+          const tx = await STATE.contract.expire(engId);
+          log(`expire() submitted, tx=${tx.hash.slice(0, 14)}…`);
+          await tx.wait();
+          log("Expired. Counterparty refunded + 10% slash.", "ok");
+        } catch (e) {
+          log(`Expire failed: ${e.message || e}`, "err");
+        }
+      }
 
-function simRunStep(){
-  if(_simStep >= SIM_STEPS.length){ _simRunning=false; return; }
-  const step = SIM_STEPS[_simStep];
+      async function doCancel() {
+        try {
+          if (!STATE.contract) throw new Error("Connect wallet first");
+          const txID = document.getElementById("cancel-txid").value.trim();
+          if (!txID) throw new Error("Need txID");
+          const tx = await STATE.contract.cancel(txID);
+          log(`cancel() submitted, tx=${tx.hash.slice(0, 14)}…`);
+          await tx.wait();
+          log("Cancelled. Collateral returned.", "ok");
+        } catch (e) {
+          log(`Cancel failed: ${e.message || e}`, "err");
+        }
+      }
 
-  // Update UI
-  document.getElementById('sim-step-title').textContent = step.title;
-  document.getElementById('sim-step-body').textContent  = step.body;
-  document.getElementById('sim-step-badge').textContent = `Step ${_simStep+1} / ${SIM_STEPS.length}`;
-  document.getElementById('sim-global-progress').style.width = ((_simStep+1)/SIM_STEPS.length*100)+'%';
-  simHighlightActors(step.actors, step.color);
+      async function scanEvents() {
+        if (!STATE.contract) { log("Connect first", "err"); return; }
+        try {
+          const block = await STATE.provider.getBlockNumber();
+          const from = Math.max(0, block - 5000);
+          const evs = await STATE.contract.queryFilter(
+            STATE.contract.filters.TxRegistered(), from, block);
+          if (evs.length === 0) {
+            document.getElementById("listing-tbl").innerHTML =
+              `<p style="color:var(--c-txt3);font-size:.85rem">No listings in recent ${block - from} blocks.</p>`;
+            return;
+          }
+          let rows = "";
+          for (const ev of evs) {
+            const txID = ev.args[0];
+            const owner = ev.args[1];
+            let stateLabel = "?", stateClass = "";
+            try {
+              const l = await STATE.contract.getListing(txID);
+              stateLabel = TX_STATE[Number(l.state)];
+              const map = { ACTIVE: "active", LOCKED: "locked", SETTLED: "settled", CANCELLED: "cancelled" };
+              stateClass = "b-" + (map[stateLabel] || "active");
+            } catch (_) {}
+            rows += `<tr>
+              <td class="mono truncate" title="${txID}">${txID.slice(0, 18)}…</td>
+              <td class="mono">${owner.slice(0, 8)}…${owner.slice(-4)}</td>
+              <td><span class="badge ${stateClass}">${stateLabel}</span></td>
+              <td><button class="btn btn-secondary" style="padding:4px 10px;font-size:.72rem"
+                onclick="document.getElementById('apply-txid').value='${txID}';document.getElementById('cancel-txid').value='${txID}'">use →</button></td>
+            </tr>`;
+          }
+          document.getElementById("listing-tbl").innerHTML =
+            `<table><thead><tr><th>txID</th><th>owner</th><th>state</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+        } catch (e) {
+          log(`Scan failed: ${e.message}`, "err");
+        }
+      }
 
-  if(_simStep>0) simAppendSep();
-
-  // Print step header
-  simAppendLine({tag:'sys', msg:`<span class="hl">── ${step.title} ──</span>`});
-  _simLineIdx = 0;
-
-  function printNextLine(){
-    if(_simLineIdx < step.lines.length){
-      simAppendLine(step.lines[_simLineIdx++]);
-      _simTimer = setTimeout(printNextLine, 280);
-    } else {
-      // Move to next step
-      _simStep++;
-      _simTimer = setTimeout(simRunStep, 1400);
-    }
-  }
-  _simTimer = setTimeout(printNextLine, 200);
-}
-
-function simStart(){
-  if(_simTimer) clearTimeout(_simTimer);
-  const out = document.getElementById('sim-terminal-output');
-  if(!out) return;
-  out.innerHTML = '';
-  _simStep=0; _simLineIdx=0; _simRunning=true;
-  simAppendLine({tag:'sys', msg:'PPREV Protocol Simulation — Hardhat Local (chainId: 31337)'});
-  simAppendLine({tag:'sys', msg:'Contract: <span class="amb">0x5FbDB231…0aa3</span>  Notary: <span class="vlt">0xa0Ee7A14…9720</span>'});
-  _simTimer = setTimeout(simRunStep, 600);
-}
-function simRestart(){ simStart() }
-
-/* ══════════════════════════════════
-   PROTO ANIMATION (Watch the Protocol)
-══════════════════════════════════ */
-const PROTO_STEPS = [
-  {
-    title:'Landlord Identity Verification',
-    desc:'Landlord queries E-Devlet via the Notary Network to confirm property ownership.',
-    nodes:['an-landlord','an-edevlet'], arrows:['aa-1'], dot:0,
-    color:'var(--c-green)', glow:'rgba(45,212,168,0.45)'
-  },
-  {
-    title:'TLSNotary Attestation',
-    desc:'Notary Network signs the ownership commitment with its private key — no PII on-chain.',
-    nodes:['an-edevlet','an-notary'], arrows:['aa-1','aa-2'], dot:1,
-    color:'var(--c-violet)', glow:'rgba(160,140,248,0.45)'
-  },
-  {
-    title:'On-Chain Registration',
-    desc:'Smart contract verifies σ via ecrecover, locks collateral. Listing → ACTIVE.',
-    nodes:['an-notary','an-contract'], arrows:['aa-2','aa-3'], dot:2,
-    color:'var(--c-amber)', glow:'rgba(245,183,49,0.45)'
-  },
-  {
-    title:'Tenant Application + Escrow',
-    desc:'Tenant submits eligibility proof and escrow deposit in one atomic transaction.',
-    nodes:['an-contract','an-tenant'], arrows:['aa-3','aa-4'], dot:3,
-    color:'var(--c-indigo)', glow:'rgba(91,99,240,0.45)'
-  },
-  {
-    title:'Settlement & Fund Release',
-    desc:'Escrow + collateral released to landlord. Slashing protects tenant if deadline missed.',
-    nodes:['an-landlord','an-contract','an-tenant'], arrows:['aa-1','aa-2','aa-3','aa-4'], dot:4,
-    color:'var(--c-green)', glow:'rgba(45,212,168,0.45)'
-  },
-];
-
-let _protoTimer = null, _protoStep = 0;
-
-function protoAnimStep(){
-  const step = PROTO_STEPS[_protoStep];
-
-  // Reset all nodes
-  ['an-landlord','an-edevlet','an-notary','an-contract','an-tenant'].forEach(id=>{
-    const el = document.getElementById(id);
-    if(!el) return;
-    const icon = el.querySelector('div');
-    if(icon){
-      icon.style.borderColor = '';
-      icon.style.boxShadow = '';
-      icon.style.transform = '';
-    }
-  });
-  // Reset all arrows
-  ['aa-1','aa-2','aa-3','aa-4'].forEach(id=>{
-    const el = document.getElementById(id);
-    if(!el) return;
-    el.style.opacity = '0.15';
-    el.querySelectorAll('line').forEach(l=>l.setAttribute('stroke','rgba(255,255,255,0.1)'));
-    el.querySelectorAll('polygon').forEach(p=>p.setAttribute('fill','rgba(255,255,255,0.1)'));
-  });
-
-  // Highlight active nodes
-  step.nodes.forEach(id=>{
-    const el = document.getElementById(id);
-    if(!el) return;
-    const icon = el.querySelector('div');
-    if(icon){
-      icon.style.borderColor = step.color;
-      icon.style.boxShadow = `0 0 18px ${step.glow}, 0 0 36px ${step.glow}`;
-      icon.style.transform = 'scale(1.1)';
-    }
-  });
-
-  // Activate arrows
-  step.arrows.forEach(id=>{
-    const el = document.getElementById(id);
-    if(!el) return;
-    el.style.opacity = '1';
-    el.querySelectorAll('line').forEach(l=>l.setAttribute('stroke',step.color));
-    el.querySelectorAll('polygon').forEach(p=>p.setAttribute('fill',step.color));
-  });
-
-  // Update step info
-  const titleEl = document.getElementById('anim-step-title');
-  const descEl  = document.getElementById('anim-step-desc');
-  if(titleEl) titleEl.textContent = step.title;
-  if(descEl)  descEl.textContent  = step.desc;
-
-  // Update dots
-  document.querySelectorAll('.anim-dot').forEach((dot,i)=>{
-    dot.style.background   = i===step.dot ? step.color : 'rgba(255,255,255,0.12)';
-    dot.style.transform    = i===step.dot ? 'scale(1.4)' : 'scale(1)';
-    dot.style.boxShadow    = i===step.dot ? `0 0 8px ${step.glow}` : 'none';
-  });
-
-  _protoStep = (_protoStep+1) % PROTO_STEPS.length;
-  _protoTimer = setTimeout(protoAnimStep, 2800);
-}
-
-function startProtoAnim(){
-  if(_protoTimer) clearTimeout(_protoTimer);
-  _protoStep = 0;
-  protoAnimStep();
-}
-
-/* ── Init ── */
-async function init(){
-  try {
-    const res  = await fetch('./deployed-addresses.json?t='+Date.now());
-    const data = await res.json();
-    CONTRACT_ADDRESS  = data.pprevSingle;
-    CONTRACT_POLICIES = data.policies||{};
-    console.log('Contract:', CONTRACT_ADDRESS);
-  } catch(e){
-    console.warn('No deployed-addresses.json — demo mode');
-  }
-
-  navigate('home');
-  renderVizStep();
-
-  // Start homepage simulation and proto animation
-  setTimeout(simStart, 800);
-  setTimeout(startProtoAnim, 1200);
-
-  if(!localStorage.getItem('pprev_seen')){
-    setTimeout(showModal, 1400);
-  }
-
-  if(window.ethereum && CONTRACT_ADDRESS){
-    const accs = await window.ethereum.request({method:'eth_accounts'}).catch(()=>[]);
-    if(accs.length>0) await connectWallet();
-    else { seedData(); updateWalletUI(); }
-    window.ethereum.on('accountsChanged', async accs=>{
-      if(accs.length===0){ STATE.wallet.connected=false; STATE.wallet.address=null; updateWalletUI(); seedData(); }
-      else await connectWallet();
-    });
-  } else {
-    seedData(); updateWalletUI();
-  }
-}
-
-window.addEventListener('resize',()=>{ if(STATE.currentPage==='visualizer') renderVizStep() });
-init();
-</script>
-</body>
+      loadDeployedAddresses();
+    </script>
+  </body>
 </html>

@@ -2,676 +2,544 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "../src/PPREVSingle.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 /// @title PPREVSecurityTest
-/// @notice Reviewer-grade security and state-machine test suite for the PPREV protocol.
-///         Covers: binding/replay safety, state-machine transitions, authorization,
-///         temporal boundary conditions, and economic invariants.
-///
-///         Tests in CATEGORY 1 (binding) use a real ECDSANotaryVerifier to exercise
-///         actual signature verification.  All other tests use the always-pass mock
-///         verifiers for simplicity.
+/// @notice Reviewer-grade security tests organized into six categories
+///         matching the paper's Section VII analysis:
+///           1. Signature binding (4)
+///           2. State machine safety (7)
+///           3. Authentication (4)
+///           4. Temporal boundaries (6)
+///           5. Economic correctness (6)
+///           6. Replay protection (1)
+///         Uses real ECDSA signatures via vm.sign throughout.
 contract PPREVSecurityTest is Test {
-    using MessageHashUtils for bytes32;
+    PPREVSingle internal pprev;
+    ECDSANotaryVerifier internal verifier;
 
-    // -- Mock verifiers --
-    MockZKVerifier zkVerifier;
-    MockThresholdSignatureVerifier sigVerifier;
+    uint256 internal notaryPk = uint256(keccak256("notary.private.key.v1"));
+    address internal notary;
 
-    // -- Main protocol under test --
-    PPREVSingle protocol;
+    uint256 internal otherPk = uint256(keccak256("other.private.key"));
 
-    // -- Notary key (test-only, well-known) --
-    uint256 constant NOTARY_PRIV_KEY = 0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6;
-    address notaryAddr;
+    address internal admin = address(0xA0);
+    address internal listingOwner = address(0xB1);
+    address internal applicant = address(0xC2);
+    address internal other = address(0xD3);
 
-    // -- Actors --
-    address lister = makeAddr("lister");
-    address applicant = makeAddr("applicant");
-    address attacker = makeAddr("attacker");
-    address anyone = makeAddr("anyone");
+    bytes32 internal constant POLICY_R = keccak256("policy.ownership");
+    bytes32 internal constant POLICY_A = keccak256("policy.eligibility");
+    bytes32 internal constant POLICY_S = keccak256("policy.settlement");
 
-    // -- Config --
-    uint256 constant FRESHNESS_WINDOW = 300;
-    uint256 constant EXPIRY_TIMEOUT = 3600;
-    uint256 constant MIN_COLLATERAL = 0.1 ether;
-    uint256 constant REQ_ESCROW = 0.05 ether;
-
-    // -- Fixtures --
-    bytes32 constant AD_HASH = keccak256("test-ad-hash");
-    bytes32 constant POLICY_ID = keccak256("test-policy");
-    bytes32 constant TRANSCRIPT_COMMIT = keccak256("transcript-commitment");
-    bytes constant DUMMY_PROOF = hex"1234";
-    bytes constant DUMMY_SIG = hex"5678";
-
-    // ============================================================
-    //  Setup & Helpers
-    // ============================================================
+    uint256 internal constant FRESHNESS = 300;
+    uint256 internal constant DEFAULT_LOCK = 7 days;
+    uint256 internal constant MIN_COLLATERAL = 1 ether;
+    uint256 internal constant REQ_ESCROW = 0.5 ether;
 
     function setUp() public {
-        notaryAddr = vm.addr(NOTARY_PRIV_KEY);
+        notary = vm.addr(notaryPk);
 
-        zkVerifier = new MockZKVerifier();
-        sigVerifier = new MockThresholdSignatureVerifier();
+        vm.startPrank(admin);
+        verifier = new ECDSANotaryVerifier(notary);
+        pprev = new PPREVSingle(address(verifier), FRESHNESS, DEFAULT_LOCK, MIN_COLLATERAL);
+        pprev.whitelistPolicy(POLICY_R, true);
+        pprev.whitelistPolicy(POLICY_A, true);
+        pprev.whitelistPolicy(POLICY_S, true);
+        vm.stopPrank();
 
-        protocol = new PPREVSingle(
-            address(zkVerifier), address(sigVerifier), FRESHNESS_WINDOW, EXPIRY_TIMEOUT, MIN_COLLATERAL
-        );
-        protocol.whitelistPolicy(POLICY_ID, true);
+        vm.deal(listingOwner, 100 ether);
+        vm.deal(applicant, 100 ether);
+        vm.deal(other, 100 ether);
 
-        vm.deal(lister, 10 ether);
-        vm.deal(applicant, 10 ether);
-        vm.deal(attacker, 10 ether);
-        vm.deal(anyone, 1 ether);
+        // Ensure block.timestamp is large enough that nothing underflows when computing _timestamp - delta
+        vm.warp(10_000);
     }
 
-    function _emptyInputs() internal pure returns (bytes32[] memory) {
-        return new bytes32[](0);
-    }
+    // ────────────────────────────────────────────────────────────────────────
+    //  Signing helpers (mirror the contract's sigMessage layout)
+    // ────────────────────────────────────────────────────────────────────────
 
-    function _notarySign(bytes32 message) internal view returns (bytes memory) {
-        bytes32 ethHash = message.toEthSignedMessageHash();
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(NOTARY_PRIV_KEY, ethHash);
+    function _signRaw(uint256 pk, bytes32 rawMessage) internal pure returns (bytes memory) {
+        bytes32 ethHash = MessageHashUtils.toEthSignedMessageHash(rawMessage);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, ethHash);
         return abi.encodePacked(r, s, v);
     }
 
-    /// @dev Listing/application sig message matching the contract:
-    ///      keccak256(caller | contract | chainId | adHash | policyId | transcript | ts | nonce)
-    function _listingMsg(
-        address caller,
-        address contractAddr,
-        bytes32 adHash,
-        bytes32 policyId,
-        bytes32 transcript,
-        uint256 ts,
-        bytes32 nonce
-    ) internal view returns (bytes32) {
-        return keccak256(abi.encodePacked(caller, contractAddr, block.chainid, adHash, policyId, transcript, ts, nonce));
+    function _sign(bytes32 rawMessage) internal view returns (bytes memory) {
+        bytes32 ethHash = MessageHashUtils.toEthSignedMessageHash(rawMessage);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(notaryPk, ethHash);
+        return abi.encodePacked(r, s, v);
     }
 
-    /// @dev Settlement sig message matching the contract:
-    ///      keccak256(caller | contract | chainId | appId | transcript | ts | nonce)
-    function _settleMsg(
-        address caller,
-        address contractAddr,
-        bytes32 appId,
-        bytes32 transcript,
-        uint256 ts,
-        bytes32 nonce
-    ) internal view returns (bytes32) {
-        return keccak256(abi.encodePacked(caller, contractAddr, block.chainid, appId, transcript, ts, nonce));
+    function _txId(bytes memory txData, bytes32 salt) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(txData, POLICY_R, salt));
     }
 
-    /// @dev Register a listing as lister using mock verifiers.
-    function _registerListing(bytes32 adHash, bytes32 nonce) internal {
+    function _msgR(address contractAddr, bytes32 txID, bytes32 txDataHash, bytes32 nonce, uint256 timestamp)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encodePacked(txID, txDataHash, POLICY_R, nonce, timestamp, contractAddr));
+    }
+
+    function _msgA(address contractAddr, bytes32 txID, bytes32 nonce, uint256 timestamp)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encodePacked(txID, POLICY_A, nonce, timestamp, contractAddr));
+    }
+
+    function _msgS(address contractAddr, bytes32 engId, bytes32 txID, bytes32 nonce, uint256 timestamp)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encodePacked(engId, txID, POLICY_S, nonce, timestamp, contractAddr));
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    //  Lifecycle helpers (with real signatures)
+    // ────────────────────────────────────────────────────────────────────────
+
+    function _registerSigned(address caller, bytes memory txData, bytes32 salt, bytes32 nonce, uint256 ts, uint256 pk)
+        internal
+        returns (bytes32 txID)
+    {
+        txID = _txId(txData, salt);
+        bytes32 txDataHash = keccak256(txData);
+        bytes memory sig = _signRaw(pk, _msgR(address(pprev), txID, txDataHash, nonce, ts));
+        vm.prank(caller);
+        pprev.register{value: MIN_COLLATERAL}(txData, POLICY_R, POLICY_A, POLICY_S, salt, REQ_ESCROW, nonce, ts, sig);
+    }
+
+    function _register(address caller, bytes memory txData, bytes32 salt, bytes32 nonce)
+        internal
+        returns (bytes32 txID)
+    {
+        return _registerSigned(caller, txData, salt, nonce, block.timestamp, notaryPk);
+    }
+
+    function _applySigned(address caller, bytes32 txID, bytes32 nonce, uint256 ts, uint256 pk)
+        internal
+        returns (bytes32 appId)
+    {
+        bytes memory sig = _signRaw(pk, _msgA(address(pprev), txID, nonce, ts));
+        vm.prank(caller);
+        appId = pprev.applyTx{value: REQ_ESCROW}(txID, nonce, ts, sig);
+    }
+
+    function _apply(address caller, bytes32 txID, bytes32 nonce) internal returns (bytes32 appId) {
+        return _applySigned(caller, txID, nonce, block.timestamp, notaryPk);
+    }
+
+    function _engage(address caller, bytes32 appId) internal returns (bytes32 engId) {
+        vm.prank(caller);
+        engId = pprev.engage(appId, 0);
+    }
+
+    function _settleSigned(address caller, bytes32 engId, bytes32 txID, bytes32 nonce, uint256 ts, uint256 pk)
+        internal
+    {
+        bytes memory sig = _signRaw(pk, _msgS(address(pprev), engId, txID, nonce, ts));
+        vm.prank(caller);
+        pprev.settle(engId, nonce, ts, sig);
+    }
+
+    function _settle(address caller, bytes32 engId, bytes32 txID, bytes32 nonce) internal {
+        _settleSigned(caller, engId, txID, nonce, block.timestamp, notaryPk);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Category 1 — Signature binding (4)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// 1.1 — Full ECDSA round-trip succeeds end-to-end.
+    function test_Binding_ValidSig_Roundtrip() public {
+        bytes32 txID = _register(listingOwner, abi.encode("ok"), bytes32(uint256(1)), bytes32(uint256(11)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(12)));
+        bytes32 engId = _engage(listingOwner, appId);
+        _settle(listingOwner, engId, txID, bytes32(uint256(13)));
+
+        assertEq(uint256(pprev.getListing(txID).state), uint256(PPREVSingle.TxState.SETTLED));
+    }
+
+    /// 1.2 — Bit-flipped σ_R is rejected.
+    function test_Binding_TamperedSig_Rejected() public {
+        bytes memory txData = abi.encode("tamper");
+        bytes32 salt = bytes32(uint256(2));
+        bytes32 nonce = bytes32(uint256(21));
         uint256 ts = block.timestamp;
-        vm.prank(lister);
-        protocol.registerListing{value: MIN_COLLATERAL}(
-            adHash, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, ts, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
+        bytes32 txID = _txId(txData, salt);
+        bytes32 txDataHash = keccak256(txData);
+
+        bytes memory sig = _sign(_msgR(address(pprev), txID, txDataHash, nonce, ts));
+        sig[0] = bytes1(uint8(sig[0]) ^ 0x01); // flip one bit
+
+        vm.prank(listingOwner);
+        vm.expectRevert(PPREVSingle.InvalidNotarySignature.selector);
+        pprev.register{value: MIN_COLLATERAL}(txData, POLICY_R, POLICY_A, POLICY_S, salt, REQ_ESCROW, nonce, ts, sig);
     }
 
-    /// @dev Apply as applicant using mock verifiers; returns on-chain appId.
-    function _applyToListing(bytes32 adHash, bytes32 nonce) internal returns (bytes32 appId) {
+    /// 1.3 — σ produced by a different key is rejected.
+    function test_Binding_WrongNotaryKey_Rejected() public {
+        bytes memory txData = abi.encode("wrongkey");
+        bytes32 salt = bytes32(uint256(3));
+        bytes32 nonce = bytes32(uint256(31));
         uint256 ts = block.timestamp;
-        vm.prank(applicant);
-        protocol.applyToListing{value: REQ_ESCROW}(
-            adHash, POLICY_ID, TRANSCRIPT_COMMIT, ts, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-        appId = keccak256(abi.encodePacked(adHash, applicant, nonce));
+        bytes32 txID = _txId(txData, salt);
+        bytes32 txDataHash = keccak256(txData);
+
+        bytes memory sig = _signRaw(otherPk, _msgR(address(pprev), txID, txDataHash, nonce, ts));
+
+        vm.prank(listingOwner);
+        vm.expectRevert(PPREVSingle.InvalidNotarySignature.selector);
+        pprev.register{value: MIN_COLLATERAL}(txData, POLICY_R, POLICY_A, POLICY_S, salt, REQ_ESCROW, nonce, ts, sig);
     }
 
-    // ============================================================
-    //  CATEGORY 1 - Binding / Replay Safety
-    //  (use real ECDSANotaryVerifier so sig recovery is exercised)
-    // ============================================================
-
-    /// @notice Cross-contract replay is blocked: sig bound to protocol1 is rejected on protocol2.
-    ///         address(this) and block.chainid are now included in the signed message hash.
-    function test_Binding_CrossContractReplay_IsBlocked() public {
-        ECDSANotaryVerifier ecdsaVerifier = new ECDSANotaryVerifier(notaryAddr);
-        MockZKVerifier zk2 = new MockZKVerifier();
-
-        PPREVSingle protocol1 =
-            new PPREVSingle(address(zk2), address(ecdsaVerifier), FRESHNESS_WINDOW, EXPIRY_TIMEOUT, MIN_COLLATERAL);
-        protocol1.whitelistPolicy(POLICY_ID, true);
-
-        PPREVSingle protocol2 =
-            new PPREVSingle(address(zk2), address(ecdsaVerifier), FRESHNESS_WINDOW, EXPIRY_TIMEOUT, MIN_COLLATERAL);
-        protocol2.whitelistPolicy(POLICY_ID, true);
-
-        vm.deal(lister, 20 ether);
-
-        uint256 ts = block.timestamp;
-        bytes32 nonce = keccak256("nonce-xreplay");
-
-        // Sig is bound to protocol1's address
-        bytes memory sig =
-            _notarySign(_listingMsg(lister, address(protocol1), AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, ts, nonce));
-
-        // Works on protocol1
-        vm.prank(lister);
-        protocol1.registerListing{value: MIN_COLLATERAL}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, ts, nonce, DUMMY_PROOF, _emptyInputs(), sig
-        );
-        assertEq(uint256(protocol1.getListing(AD_HASH).status), uint256(PPREVSingle.ListingStatus.ACTIVE));
-
-        // Replay on protocol2 must revert — sig hash contains protocol1's address
-        bytes32 nonce2 = keccak256("nonce-xreplay-2");
-        bytes memory sig2 =
-            _notarySign(_listingMsg(lister, address(protocol1), AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, ts, nonce2));
-        vm.expectRevert(PPREVSingle.InvalidThresholdSignature.selector);
-        vm.prank(lister);
-        protocol2.registerListing{value: MIN_COLLATERAL}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, ts, nonce2, DUMMY_PROOF, _emptyInputs(), sig2
-        );
-    }
-
-    /// @notice Caller-bound registerListing: attacker cannot submit lister's sig.
-    function test_Binding_CallerBound_RegisterListing_AttackerReverts() public {
-        ECDSANotaryVerifier ecdsaVerifier = new ECDSANotaryVerifier(notaryAddr);
-        MockZKVerifier zk2 = new MockZKVerifier();
-        PPREVSingle proto =
-            new PPREVSingle(address(zk2), address(ecdsaVerifier), FRESHNESS_WINDOW, EXPIRY_TIMEOUT, MIN_COLLATERAL);
-        proto.whitelistPolicy(POLICY_ID, true);
-        vm.deal(attacker, 5 ether);
-
-        bytes32 nonce = keccak256("nonce-caller-reg");
-        uint256 ts = block.timestamp;
-        bytes memory sig =
-            _notarySign(_listingMsg(lister, address(proto), AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, ts, nonce));
-
-        vm.expectRevert(PPREVSingle.InvalidThresholdSignature.selector);
-        vm.prank(attacker);
-        proto.registerListing{value: MIN_COLLATERAL}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, ts, nonce, DUMMY_PROOF, _emptyInputs(), sig
-        );
-    }
-
-    /// @notice Caller-bound applyToListing: attacker cannot reuse applicant's eligibility sig.
-    function test_Binding_CallerBound_ApplyToListing_AttackerReverts() public {
-        ECDSANotaryVerifier ecdsaVerifier = new ECDSANotaryVerifier(notaryAddr);
-        MockZKVerifier zk2 = new MockZKVerifier();
-        PPREVSingle proto =
-            new PPREVSingle(address(zk2), address(ecdsaVerifier), FRESHNESS_WINDOW, EXPIRY_TIMEOUT, MIN_COLLATERAL);
-        proto.whitelistPolicy(POLICY_ID, true);
-        vm.deal(lister, 5 ether);
-        vm.deal(applicant, 5 ether);
-        vm.deal(attacker, 5 ether);
-
-        uint256 ts = block.timestamp;
-        bytes32 regNonce = keccak256("reg-nonce-cbind");
-        bytes memory regSig =
-            _notarySign(_listingMsg(lister, address(proto), AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, ts, regNonce));
-        vm.prank(lister);
-        proto.registerListing{value: MIN_COLLATERAL}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, ts, regNonce, DUMMY_PROOF, _emptyInputs(), regSig
-        );
-
-        bytes32 appNonce = keccak256("apply-nonce-bind");
-        // Sig bound to applicant's address, not attacker
-        bytes memory appSig =
-            _notarySign(_listingMsg(applicant, address(proto), AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, ts, appNonce));
-
-        vm.expectRevert(PPREVSingle.InvalidThresholdSignature.selector);
-        vm.prank(attacker);
-        proto.applyToListing{value: REQ_ESCROW}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, ts, appNonce, DUMMY_PROOF, _emptyInputs(), appSig
-        );
-    }
-
-    /// @notice Wrong adHash produces a different appId - ApplicationNotFound on settle.
-    function test_Binding_WrongAdHash_SettleFails() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        _applyToListing(AD_HASH, keccak256("app-n"));
-
-        bytes32 fakeAd = keccak256("fake-ad");
-        bytes32 fakeAppId = keccak256(abi.encodePacked(fakeAd, applicant, keccak256("app-n")));
-
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ApplicationNotFound.selector, fakeAppId));
-        vm.prank(lister);
-        protocol.settleListing(
-            fakeAppId, TRANSCRIPT_COMMIT, block.timestamp, keccak256("settle-n"), DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-    }
-
-    /// @notice A nonce consumed in Phase 1 cannot be reused in Phase 2.
-    function test_Replay_NonceCrossPhase_Rejected() public {
-        bytes32 nonce = keccak256("shared-nonce");
-        _registerListing(AD_HASH, nonce);
-
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.NonceAlreadyUsed.selector, nonce));
-        vm.prank(applicant);
-        protocol.applyToListing{value: REQ_ESCROW}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-    }
-
-    // ============================================================
-    //  CATEGORY 2 - State Machine Safety
-    // ============================================================
-
-    /// @notice Cannot apply to a LOCKED listing.
-    function test_SM_RejectApply_WhenLocked() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        _applyToListing(AD_HASH, keccak256("app-n1")); // listing -> LOCKED
-
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ListingNotActive.selector, AD_HASH));
-        vm.prank(anyone);
-        protocol.applyToListing{value: REQ_ESCROW}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            keccak256("app-n2"),
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
-    }
-
-    /// @notice Cannot apply to a SETTLED listing.
-    function test_SM_RejectApply_WhenSettled() public {
-        _registerListing(AD_HASH, keccak256("r-n"));
-        bytes32 appId = _applyToListing(AD_HASH, keccak256("a-n"));
-
-        vm.prank(lister);
-        protocol.settleListing(
-            appId, TRANSCRIPT_COMMIT, block.timestamp, keccak256("settle-n"), DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ListingNotActive.selector, AD_HASH));
-        vm.prank(applicant);
-        protocol.applyToListing{value: REQ_ESCROW}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            keccak256("app-n2"),
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
-    }
-
-    /// @notice Cannot apply to a CANCELLED listing.
-    function test_SM_RejectApply_WhenCancelled() public {
-        _registerListing(AD_HASH, keccak256("reg-nc"));
-        vm.prank(lister);
-        protocol.cancelListing(AD_HASH);
-
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ListingNotActive.selector, AD_HASH));
-        vm.prank(applicant);
-        protocol.applyToListing{value: REQ_ESCROW}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            keccak256("app-nc"),
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
-    }
-
-    /// @notice Cannot settle an application whose status is EXPIRED.
-    function test_SM_RejectSettle_AfterExpired() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        bytes32 appId = _applyToListing(AD_HASH, keccak256("app-n"));
-
-        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
-        protocol.expireApplication(appId);
-        // Status is now EXPIRED
-
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ApplicationNotPending.selector, appId));
-        vm.prank(lister);
-        protocol.settleListing(
-            appId, TRANSCRIPT_COMMIT, block.timestamp, keccak256("settle-n"), DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-    }
-
-    /// @notice Double settlement on the same appId is rejected.
-    function test_SM_RejectDoubleSettlement() public {
-        _registerListing(AD_HASH, keccak256("r-n"));
-        bytes32 appId = _applyToListing(AD_HASH, keccak256("a-n"));
-
-        vm.prank(lister);
-        protocol.settleListing(
-            appId, TRANSCRIPT_COMMIT, block.timestamp, keccak256("settle-n1"), DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ApplicationNotPending.selector, appId));
-        vm.prank(lister);
-        protocol.settleListing(
-            appId, TRANSCRIPT_COMMIT, block.timestamp, keccak256("settle-n2"), DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-    }
-
-    /// @notice A second applicant cannot apply while listing is LOCKED.
-    function test_SM_RejectSecondApply_WhileLocked() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        _applyToListing(AD_HASH, keccak256("app-n1"));
-
-        address applicant2 = makeAddr("applicant2");
-        vm.deal(applicant2, 5 ether);
-
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ListingNotActive.selector, AD_HASH));
-        vm.prank(applicant2);
-        protocol.applyToListing{value: REQ_ESCROW}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            keccak256("app-n2"),
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
-    }
-
-    /// @notice After expiration, listing reverts to ACTIVE and a fresh application succeeds.
-    function test_SM_AfterExpire_FreshApplySucceeds() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        bytes32 appId1 = _applyToListing(AD_HASH, keccak256("app-n1"));
-
-        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
-        protocol.expireApplication(appId1);
-
-        assertEq(uint256(protocol.getListing(AD_HASH).status), uint256(PPREVSingle.ListingStatus.ACTIVE));
-
-        bytes32 nonce2 = keccak256("app-n2");
-        vm.prank(applicant);
-        protocol.applyToListing{value: REQ_ESCROW}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        bytes32 appId2 = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
-        assertEq(
-            uint256(protocol.getApplication(appId2).status), uint256(PPREVSingle.ApplicationStatus.PENDING_TRANSFER)
-        );
-    }
-
-    // ============================================================
-    //  CATEGORY 3 - Authorization Safety
-    // ============================================================
-
-    /// @notice Non-owner cannot cancel the listing.
-    function test_Auth_RejectCancel_ByNonOwner() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.CallerNotListingOwner.selector, attacker, lister));
-        vm.prank(attacker);
-        protocol.cancelListing(AD_HASH);
-    }
-
-    /// @notice Self-application is rejected: landlord cannot apply to their own listing.
-    function test_Auth_SelfApplication_IsRejected() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-
-        vm.expectRevert(PPREVSingle.CannotApplyToOwnListing.selector);
-        vm.prank(lister);
-        protocol.applyToListing{value: REQ_ESCROW}(
-            AD_HASH,
-            POLICY_ID,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            keccak256("self-app-n"),
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
-    }
-
-    /// @notice All admin functions reject non-owner callers.
-    function test_Auth_AllAdminFunctions_RejectNonOwner() public {
-        vm.startPrank(attacker);
-
-        vm.expectRevert(PPREVSingle.NotOwner.selector);
-        protocol.setMinCollateral(1 ether);
-
-        vm.expectRevert(PPREVSingle.NotOwner.selector);
-        protocol.setFreshnessWindow(1);
-
-        vm.expectRevert(PPREVSingle.NotOwner.selector);
-        protocol.setExpiryTimeout(1);
-
-        vm.expectRevert(PPREVSingle.NotOwner.selector);
-        protocol.setZKVerifier(address(zkVerifier));
-
-        vm.expectRevert(PPREVSingle.NotOwner.selector);
-        protocol.setThresholdVerifier(address(sigVerifier));
-
-        vm.expectRevert(PPREVSingle.NotOwner.selector);
-        protocol.whitelistPolicy(POLICY_ID, false);
-
+    /// 1.4 — σ valid for contract A is rejected when submitted to contract B (paper VII.C cross-contract).
+    function test_Binding_CrossContractReplay_Blocked() public {
+        // Deploy a sibling contract
+        vm.startPrank(admin);
+        PPREVSingle pprev2 = new PPREVSingle(address(verifier), FRESHNESS, DEFAULT_LOCK, MIN_COLLATERAL);
+        pprev2.whitelistPolicy(POLICY_R, true);
+        pprev2.whitelistPolicy(POLICY_A, true);
+        pprev2.whitelistPolicy(POLICY_S, true);
         vm.stopPrank();
-    }
 
-    /// @notice Non-listing-owner cannot call settleListing.
-    function test_Auth_RejectSettle_ByNonListingOwner() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        bytes32 appId = _applyToListing(AD_HASH, keccak256("app-n"));
+        bytes memory txData = abi.encode("cross");
+        bytes32 salt = bytes32(uint256(4));
+        bytes32 nonce = bytes32(uint256(41));
+        uint256 ts = block.timestamp;
+        bytes32 txID = _txId(txData, salt);
+        bytes32 txDataHash = keccak256(txData);
 
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.CallerNotListingOwner.selector, attacker, lister));
-        vm.prank(attacker);
-        protocol.settleListing(
-            appId, TRANSCRIPT_COMMIT, block.timestamp, keccak256("settle-n"), DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+        // Sign for pprev (contract A); submit to pprev2 (contract B)
+        bytes memory sigForA = _sign(_msgR(address(pprev), txID, txDataHash, nonce, ts));
+
+        vm.prank(listingOwner);
+        vm.expectRevert(PPREVSingle.InvalidNotarySignature.selector);
+        pprev2.register{value: MIN_COLLATERAL}(
+            txData, POLICY_R, POLICY_A, POLICY_S, salt, REQ_ESCROW, nonce, ts, sigForA
         );
     }
 
-    // ============================================================
-    //  CATEGORY 4 - Temporal Safety
-    // ============================================================
+    // ════════════════════════════════════════════════════════════════════════
+    //  Category 2 — State machine safety (7)
+    // ════════════════════════════════════════════════════════════════════════
 
-    /// @notice Settlement reverts with ApplicationExpiredCannotSettle when past expiry.
-    function test_Temporal_RejectSettle_PastExpiry() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        bytes32 appId = _applyToListing(AD_HASH, keccak256("app-n"));
+    /// 2.1 — Apply on a never-registered txID is rejected.
+    function test_State_ApplyOnUnknownTx_Rejected() public {
+        bytes32 fakeTxID = keccak256("fake");
+        vm.prank(applicant);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.TxNotActive.selector, fakeTxID));
+        pprev.applyTx{value: REQ_ESCROW}(fakeTxID, bytes32(uint256(101)), block.timestamp, hex"00");
+    }
 
-        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
+    /// 2.2 — Engage on an unknown appId is rejected.
+    function test_State_EngageUnknownApp_Rejected() public {
+        bytes32 fakeAppId = keccak256("fakeapp");
+        vm.prank(listingOwner);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ApplicationNotFound.selector, fakeAppId));
+        pprev.engage(fakeAppId, 0);
+    }
 
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ApplicationExpiredCannotSettle.selector, appId));
-        vm.prank(lister);
-        protocol.settleListing(
-            appId, TRANSCRIPT_COMMIT, block.timestamp, keccak256("settle-n"), DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
+    /// 2.3 — Apply on a CANCELLED listing is rejected.
+    function test_State_CancelledNotAcceptingApply() public {
+        bytes32 txID = _register(listingOwner, abi.encode("cncl"), bytes32(uint256(5)), bytes32(uint256(51)));
+        vm.prank(listingOwner);
+        pprev.cancel(txID);
+
+        bytes32 nonce = bytes32(uint256(52));
+        bytes memory sig = _sign(_msgA(address(pprev), txID, nonce, block.timestamp));
+        vm.prank(applicant);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.TxNotActive.selector, txID));
+        pprev.applyTx{value: REQ_ESCROW}(txID, nonce, block.timestamp, sig);
+    }
+
+    /// 2.4 — Engage twice on the same listing (state LOCKED) is rejected.
+    function test_State_DoubleEngage_Rejected() public {
+        bytes32 txID = _register(listingOwner, abi.encode("dbl"), bytes32(uint256(6)), bytes32(uint256(61)));
+        bytes32 appId1 = _apply(applicant, txID, bytes32(uint256(62)));
+        _engage(listingOwner, appId1);
+
+        // Even attempting to engage the same app again fails (status no longer PENDING)
+        vm.prank(listingOwner);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ApplicationNotPending.selector, appId1));
+        pprev.engage(appId1, 0);
+    }
+
+    /// 2.5 — Settle without prior engagement is rejected.
+    function test_State_SettleWithoutEngage_Rejected() public {
+        bytes32 fakeEngId = keccak256("fakeeng");
+        bytes memory sig = _sign(_msgS(address(pprev), fakeEngId, bytes32(0), bytes32(uint256(71)), block.timestamp));
+        vm.prank(listingOwner);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.EngagementNotFound.selector, fakeEngId));
+        pprev.settle(fakeEngId, bytes32(uint256(71)), block.timestamp, sig);
+    }
+
+    /// 2.6 — Settle twice on the same engagement is rejected.
+    function test_State_DoubleSettle_Rejected() public {
+        bytes32 txID = _register(listingOwner, abi.encode("dst"), bytes32(uint256(7)), bytes32(uint256(81)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(82)));
+        bytes32 engId = _engage(listingOwner, appId);
+        _settle(listingOwner, engId, txID, bytes32(uint256(83)));
+
+        bytes32 nonce2 = bytes32(uint256(84));
+        bytes memory sig = _sign(_msgS(address(pprev), engId, txID, nonce2, block.timestamp));
+        vm.prank(listingOwner);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.EngagementNotActive.selector, engId));
+        pprev.settle(engId, nonce2, block.timestamp, sig);
+    }
+
+    /// 2.7 — Cancel on a LOCKED listing is rejected.
+    function test_State_CancelLocked_Rejected() public {
+        bytes32 txID = _register(listingOwner, abi.encode("clk"), bytes32(uint256(8)), bytes32(uint256(91)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(92)));
+        _engage(listingOwner, appId);
+
+        vm.prank(listingOwner);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.TxNotActive.selector, txID));
+        pprev.cancel(txID);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Category 3 — Authentication (4)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// 3.1 — Only listing owner may engage.
+    function test_Auth_Engage_OnlyOwner() public {
+        bytes32 txID = _register(listingOwner, abi.encode("au1"), bytes32(uint256(1)), bytes32(uint256(110)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(111)));
+
+        vm.prank(other);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.CallerNotListingOwner.selector, other, listingOwner));
+        pprev.engage(appId, 0);
+    }
+
+    /// 3.2 — Only listing owner may settle.
+    function test_Auth_Settle_OnlyOwner() public {
+        bytes32 txID = _register(listingOwner, abi.encode("au2"), bytes32(uint256(1)), bytes32(uint256(120)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(121)));
+        bytes32 engId = _engage(listingOwner, appId);
+
+        bytes32 nonce = bytes32(uint256(122));
+        bytes memory sig = _sign(_msgS(address(pprev), engId, txID, nonce, block.timestamp));
+
+        vm.prank(other);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.CallerNotListingOwner.selector, other, listingOwner));
+        pprev.settle(engId, nonce, block.timestamp, sig);
+    }
+
+    /// 3.3 — Only listing owner may cancel.
+    function test_Auth_Cancel_OnlyOwner() public {
+        bytes32 txID = _register(listingOwner, abi.encode("au3"), bytes32(uint256(1)), bytes32(uint256(130)));
+        vm.prank(other);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.CallerNotListingOwner.selector, other, listingOwner));
+        pprev.cancel(txID);
+    }
+
+    /// 3.4 — Admin-only setters reject non-admin callers.
+    function test_Auth_AdminOnlySettings() public {
+        vm.prank(other);
+        vm.expectRevert(PPREVSingle.NotAdmin.selector);
+        pprev.setFreshnessWindow(60);
+
+        vm.prank(other);
+        vm.expectRevert(PPREVSingle.NotAdmin.selector);
+        pprev.setMaxExpirations(10);
+
+        vm.prank(other);
+        vm.expectRevert(PPREVSingle.NotAdmin.selector);
+        pprev.whitelistPolicy(keccak256("x"), true);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Category 4 — Temporal boundaries (6)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// 4.1 — Freshness at the exact boundary (now == t + Δ) is allowed.
+    function test_Temporal_Freshness_AtExactBoundary_Allowed() public {
+        // setUp warps to 10000; the IR optimizer caches block.timestamp reads, so use
+        // explicit constants for attestedAt and the warp target.
+        uint256 attestedAt = 10_000;
+        vm.warp(attestedAt + FRESHNESS); // exactly at boundary
+
+        bytes32 txID = _registerSigned(
+            listingOwner, abi.encode("fb"), bytes32(uint256(1)), bytes32(uint256(141)), attestedAt, notaryPk
+        );
+        assertEq(uint256(pprev.getListing(txID).state), uint256(PPREVSingle.TxState.ACTIVE));
+    }
+
+    /// 4.2 — Freshness one second past Δ is rejected.
+    function test_Temporal_Freshness_OneSecondPast_Rejected() public {
+        uint256 attestedAt = 10_000;
+        uint256 callTime = attestedAt + FRESHNESS + 1;
+        vm.warp(callTime);
+
+        bytes memory txData = abi.encode("fbp");
+        bytes32 salt = bytes32(uint256(1));
+        bytes32 nonce = bytes32(uint256(151));
+        bytes32 txID = _txId(txData, salt);
+        bytes32 txDataHash = keccak256(txData);
+        bytes memory sig = _sign(_msgR(address(pprev), txID, txDataHash, nonce, attestedAt));
+
+        vm.prank(listingOwner);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.FreshnessWindowExceeded.selector, attestedAt, callTime));
+        pprev.register{value: MIN_COLLATERAL}(
+            txData, POLICY_R, POLICY_A, POLICY_S, salt, REQ_ESCROW, nonce, attestedAt, sig
         );
     }
 
-    /// @notice Boundary: at exactly expires_at, settle still succeeds (strict > check).
-    function test_Temporal_Boundary_AtExpiresAt_SettleSucceeds() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        bytes32 appId = _applyToListing(AD_HASH, keccak256("app-n"));
-        uint256 expiresAt = protocol.getApplication(appId).createdAt + EXPIRY_TIMEOUT;
+    /// 4.3 — Settle exactly at expiresAt is allowed (paper V.D condition: now ≤ expiresAt).
+    function test_Temporal_Settle_AtExactExpiry_Allowed() public {
+        bytes32 txID = _register(listingOwner, abi.encode("se1"), bytes32(uint256(1)), bytes32(uint256(161)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(162)));
+        bytes32 engId = _engage(listingOwner, appId);
 
-        vm.warp(expiresAt); // block.timestamp == expiresAt -> NOT > expiresAt -> allowed
-
-        vm.prank(lister);
-        protocol.settleListing(
-            appId, TRANSCRIPT_COMMIT, block.timestamp, keccak256("settle-n"), DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        assertEq(uint256(protocol.getApplication(appId).status), uint256(PPREVSingle.ApplicationStatus.SETTLED));
+        uint256 expiresAt = pprev.getEngagement(engId).expiresAt;
+        vm.warp(expiresAt); // exactly at expiresAt
+        _settle(listingOwner, engId, txID, bytes32(uint256(163)));
+        assertEq(uint256(pprev.getListing(txID).state), uint256(PPREVSingle.TxState.SETTLED));
     }
 
-    /// @notice Boundary: at exactly expires_at, expire reverts (strict > check).
-    function test_Temporal_Boundary_AtExpiresAt_ExpireReverts() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        bytes32 appId = _applyToListing(AD_HASH, keccak256("app-n"));
-        uint256 expiresAt = protocol.getApplication(appId).createdAt + EXPIRY_TIMEOUT;
+    /// 4.4 — Settle one second past expiresAt is rejected.
+    function test_Temporal_Settle_OneSecondPastExpiry_Rejected() public {
+        bytes32 txID = _register(listingOwner, abi.encode("se2"), bytes32(uint256(1)), bytes32(uint256(171)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(172)));
+        bytes32 engId = _engage(listingOwner, appId);
 
-        vm.warp(expiresAt); // block.timestamp <= expiresAt -> not yet expirable
-
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ApplicationNotYetExpirable.selector, appId, expiresAt));
-        protocol.expireApplication(appId);
-    }
-
-    /// @notice Boundary: at expires_at + 1, settle reverts and expire succeeds.
-    ///         Confirms the two operations are mutually exclusive at every second.
-    function test_Temporal_Boundary_AtExpiresAtPlusOne_CleanHandoff() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        bytes32 appId = _applyToListing(AD_HASH, keccak256("app-n"));
-        uint256 expiresAt = protocol.getApplication(appId).createdAt + EXPIRY_TIMEOUT;
-
+        uint256 expiresAt = pprev.getEngagement(engId).expiresAt;
         vm.warp(expiresAt + 1);
 
-        // Settle must revert with ApplicationExpiredCannotSettle
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ApplicationExpiredCannotSettle.selector, appId));
-        vm.prank(lister);
-        protocol.settleListing(
-            appId, TRANSCRIPT_COMMIT, block.timestamp, keccak256("settle-n"), DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        // Expire must succeed
-        protocol.expireApplication(appId);
-        assertEq(uint256(protocol.getApplication(appId).status), uint256(PPREVSingle.ApplicationStatus.EXPIRED));
+        bytes32 nonce = bytes32(uint256(173));
+        bytes memory sig = _sign(_msgS(address(pprev), engId, txID, nonce, block.timestamp));
+        vm.prank(listingOwner);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.EngagementAlreadyExpired.selector, engId));
+        pprev.settle(engId, nonce, block.timestamp, sig);
     }
 
-    /// @notice Freshness boundary: sig exactly freshnessWindow seconds old is accepted.
-    ///         Check: block.timestamp > sigTs + window -> 10000 > 10000 -> false -> pass.
-    function test_Temporal_Boundary_Freshness_ExactEdge_Accepted() public {
-        vm.warp(10_000);
-        uint256 sigTs = block.timestamp - FRESHNESS_WINDOW; // 9700
-        bytes32 nonce = keccak256("fresh-exact");
+    /// 4.5 — Expire before expiresAt is rejected.
+    function test_Temporal_Expire_BeforeExpiry_Rejected() public {
+        bytes32 txID = _register(listingOwner, abi.encode("ex1"), bytes32(uint256(1)), bytes32(uint256(181)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(182)));
+        bytes32 engId = _engage(listingOwner, appId);
 
-        vm.prank(lister);
-        protocol.registerListing{value: MIN_COLLATERAL}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, sigTs, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-        assertEq(uint256(protocol.getListing(AD_HASH).status), uint256(PPREVSingle.ListingStatus.ACTIVE));
+        uint256 expiresAt = pprev.getEngagement(engId).expiresAt;
+        vm.warp(expiresAt - 1);
+
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.EngagementNotYetExpirable.selector, engId, expiresAt));
+        pprev.expire(engId);
     }
 
-    /// @notice Freshness boundary: one second beyond window is rejected.
-    ///         Check: block.timestamp > sigTs + window -> 10000 > 9999 -> true -> revert.
-    function test_Temporal_Boundary_Freshness_OneBeyond_Rejected() public {
-        vm.warp(10_000);
-        uint256 sigTs = block.timestamp - FRESHNESS_WINDOW - 1; // 9699
-        bytes32 nonce = keccak256("fresh-over");
+    /// 4.6 — Expire at exactly expiresAt is rejected (strict >).
+    function test_Temporal_Expire_AtExactExpiry_Rejected() public {
+        bytes32 txID = _register(listingOwner, abi.encode("ex2"), bytes32(uint256(1)), bytes32(uint256(191)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(192)));
+        bytes32 engId = _engage(listingOwner, appId);
 
-        vm.expectRevert();
-        vm.prank(lister);
-        protocol.registerListing{value: MIN_COLLATERAL}(
-            AD_HASH, POLICY_ID, REQ_ESCROW, TRANSCRIPT_COMMIT, sigTs, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
+        uint256 expiresAt = pprev.getEngagement(engId).expiresAt;
+        vm.warp(expiresAt); // strictly == not allowed
+
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.EngagementNotYetExpirable.selector, engId, expiresAt));
+        pprev.expire(engId);
     }
 
-    // ============================================================
-    //  CATEGORY 5 - Economic Correctness
-    // ============================================================
+    // ════════════════════════════════════════════════════════════════════════
+    //  Category 5 — Economic correctness (6)
+    // ════════════════════════════════════════════════════════════════════════
 
-    /// @notice Exact balance accounting after successful settlement.
-    ///         Lister receives escrow + collateral; contract is fully drained.
-    function test_Econ_Settlement_ExactBalances() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        bytes32 appId = _applyToListing(AD_HASH, keccak256("app-n"));
-
-        uint256 listerBefore = lister.balance;
-        uint256 applicantBefore = applicant.balance;
-
-        vm.prank(lister);
-        protocol.settleListing(
-            appId, TRANSCRIPT_COMMIT, block.timestamp, keccak256("settle-n"), DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        assertEq(lister.balance - listerBefore, REQ_ESCROW + MIN_COLLATERAL, "lister balance wrong");
-        assertEq(applicant.balance, applicantBefore, "applicant should be unchanged");
-        assertEq(address(protocol).balance, 0, "contract not fully drained");
+    /// 5.1 — After settle, contract holds zero residual ETH.
+    function test_Econ_Settle_NoResidualBalance() public {
+        bytes32 txID = _register(listingOwner, abi.encode("ec1"), bytes32(uint256(1)), bytes32(uint256(201)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(202)));
+        bytes32 engId = _engage(listingOwner, appId);
+        _settle(listingOwner, engId, txID, bytes32(uint256(203)));
+        assertEq(address(pprev).balance, 0);
     }
 
-    /// @notice Exact balance accounting after expiration with slashing.
-    ///         Applicant receives escrow + 10% slash; remaining collateral stays in contract.
-    function test_Econ_Expiration_ExactBalances() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        bytes32 appId = _applyToListing(AD_HASH, keccak256("app-n"));
+    /// 5.2 — After expire, contract holds zero residual ETH (and listing.collateral reduced).
+    function test_Econ_Expire_NoResidualBalance() public {
+        bytes32 txID = _register(listingOwner, abi.encode("ec2"), bytes32(uint256(1)), bytes32(uint256(211)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(212)));
+        bytes32 engId = _engage(listingOwner, appId);
 
-        uint256 listerBefore = lister.balance;
-        uint256 applicantBefore = applicant.balance;
+        vm.warp(pprev.getEngagement(engId).expiresAt + 1);
+        pprev.expire(engId);
 
-        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
-        protocol.expireApplication(appId);
-
-        uint256 slashAmount = (MIN_COLLATERAL * 1000) / 10_000; // 0.01 ETH
-
-        assertEq(applicant.balance - applicantBefore, REQ_ESCROW + slashAmount, "applicant balance wrong");
-        assertEq(lister.balance, listerBefore, "lister should be unchanged");
-        assertEq(address(protocol).balance, MIN_COLLATERAL - slashAmount, "contract balance wrong");
-        assertEq(protocol.getListing(AD_HASH).collateral, MIN_COLLATERAL - slashAmount, "listing collateral wrong");
+        // remaining collateral still sits in the contract for the next applicant
+        assertEq(address(pprev).balance, MIN_COLLATERAL - MIN_COLLATERAL / 10);
     }
 
-    /// @notice Exact balance accounting after cancellation - full collateral returned.
-    function test_Econ_Cancel_ExactBalances_NoStuckFunds() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-
-        uint256 listerBefore = lister.balance;
-        vm.prank(lister);
-        protocol.cancelListing(AD_HASH);
-
-        assertEq(lister.balance - listerBefore, MIN_COLLATERAL, "lister balance wrong");
-        assertEq(address(protocol).balance, 0, "stuck funds after cancel");
-        assertEq(protocol.getListing(AD_HASH).collateral, 0, "collateral field not zeroed");
+    /// 5.3 — After cancel, contract holds zero residual ETH.
+    function test_Econ_Cancel_NoResidualBalance() public {
+        bytes32 txID = _register(listingOwner, abi.encode("ec3"), bytes32(uint256(1)), bytes32(uint256(221)));
+        vm.prank(listingOwner);
+        pprev.cancel(txID);
+        assertEq(address(pprev).balance, 0);
     }
 
-    /// @notice After expiration, remaining collateral is recoverable via cancelListing.
-    function test_Econ_NoStuckFunds_AfterExpireThenCancel() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        bytes32 appId = _applyToListing(AD_HASH, keccak256("app-n"));
+    /// 5.4 — Slashing is compounding: collateral after k expirations = floor((9/10)^k) of original.
+    function test_Econ_Expire_CompoundingSlash() public {
+        bytes32 txID = _register(listingOwner, abi.encode("ec4"), bytes32(uint256(1)), bytes32(uint256(231)));
+        uint256 expected = MIN_COLLATERAL;
 
-        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
-        protocol.expireApplication(appId);
-
-        uint256 remaining = protocol.getListing(AD_HASH).collateral;
-        assertGt(remaining, 0);
-
-        uint256 listerBefore = lister.balance;
-        vm.prank(lister);
-        protocol.cancelListing(AD_HASH);
-
-        assertEq(lister.balance - listerBefore, remaining, "lister did not recover remaining collateral");
-        assertEq(address(protocol).balance, 0, "stuck funds after expire+cancel");
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 appId = _apply(applicant, txID, bytes32(uint256(240 + i)));
+            bytes32 engId = _engage(listingOwner, appId);
+            vm.warp(pprev.getEngagement(engId).expiresAt + 1);
+            pprev.expire(engId);
+            expected -= expected / 10;
+        }
+        assertEq(pprev.getListing(txID).collateral, expected);
     }
 
-    /// @notice Slash compounds on remaining collateral across two expiration cycles.
-    ///         Cycle 1: 10% of 0.1 ETH = 0.01 ETH slashed -> 0.09 ETH remains.
-    ///         Cycle 2: 10% of 0.09 ETH = 0.009 ETH slashed -> 0.081 ETH remains.
-    function test_Econ_SlashAccumulation_TwoExpirations() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
+    /// 5.5 — Settle balance accounting: owner +escrow (-collateral +collateral); applicant -escrow.
+    function test_Econ_Settle_BalancesExact() public {
+        uint256 ownerStart = listingOwner.balance;
+        uint256 appStart = applicant.balance;
 
-        // First expiration
-        bytes32 appId1 = _applyToListing(AD_HASH, keccak256("app-n1"));
-        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
-        protocol.expireApplication(appId1);
-        assertEq(protocol.getListing(AD_HASH).collateral, 0.09 ether, "wrong collateral after 1st expire");
+        bytes32 txID = _register(listingOwner, abi.encode("ec5"), bytes32(uint256(1)), bytes32(uint256(251)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(252)));
+        bytes32 engId = _engage(listingOwner, appId);
+        _settle(listingOwner, engId, txID, bytes32(uint256(253)));
 
-        // Second expiration
-        bytes32 nonce2 = keccak256("app-n2");
+        assertEq(listingOwner.balance, ownerStart + REQ_ESCROW);
+        assertEq(applicant.balance, appStart - REQ_ESCROW);
+    }
+
+    /// 5.6 — Expire balance accounting: applicant nets +slashAmount; owner unchanged at expire time.
+    function test_Econ_Expire_BalancesExact() public {
+        uint256 ownerStart = listingOwner.balance;
+        uint256 appStart = applicant.balance;
+
+        bytes32 txID = _register(listingOwner, abi.encode("ec6"), bytes32(uint256(1)), bytes32(uint256(261)));
+        bytes32 appId = _apply(applicant, txID, bytes32(uint256(262)));
+        bytes32 engId = _engage(listingOwner, appId);
+
+        vm.warp(pprev.getEngagement(engId).expiresAt + 1);
+        pprev.expire(engId);
+
+        assertEq(applicant.balance, appStart + MIN_COLLATERAL / 10);
+        assertEq(listingOwner.balance, ownerStart - MIN_COLLATERAL); // collateral still locked, will return at cancel
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Category 6 — Replay protection (1)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// 6.1 — A nonce consumed in any phase cannot be reused in another (paper VII.C cross-phase substitution).
+    function test_Replay_NonceCrossPhase_Rejected() public {
+        bytes32 sharedNonce = bytes32(uint256(0xCAFE));
+        bytes32 txID = _register(listingOwner, abi.encode("rp"), bytes32(uint256(1)), sharedNonce);
+
+        // Try to reuse the same nonce in apply
+        bytes memory sigA = _sign(_msgA(address(pprev), txID, sharedNonce, block.timestamp));
         vm.prank(applicant);
-        protocol.applyToListing{value: REQ_ESCROW}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-        bytes32 appId2 = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
-
-        // Read createdAt from storage to avoid Solidity optimizer caching block.timestamp
-        // (the optimizer may reuse the pre-warp value if block.timestamp appears multiple times
-        //  in the same function, causing vm.warp to use a stale base).
-        uint256 createdAt2 = protocol.getApplication(appId2).createdAt;
-        vm.warp(createdAt2 + EXPIRY_TIMEOUT + 1);
-        protocol.expireApplication(appId2);
-        assertEq(protocol.getListing(AD_HASH).collateral, 0.081 ether, "wrong collateral after 2nd expire");
-    }
-
-    /// @notice settleListing zeroes app.escrowAmount and listing.collateral after transfer.
-    ///         Prevents stale storage from misleading frontend and off-chain monitoring.
-    function test_Econ_SettleListing_StorageZeroedAfterSettle() public {
-        _registerListing(AD_HASH, keccak256("reg-n"));
-        bytes32 appId = _applyToListing(AD_HASH, keccak256("app-n"));
-
-        vm.prank(lister);
-        protocol.settleListing(
-            appId, TRANSCRIPT_COMMIT, block.timestamp, keccak256("settle-n"), DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        assertEq(address(protocol).balance, 0, "stuck ETH after settleListing");
-        assertEq(protocol.getApplication(appId).escrowAmount, 0, "app.escrowAmount not zeroed");
-        assertEq(protocol.getListing(AD_HASH).collateral, 0, "listing.collateral not zeroed");
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.NonceAlreadyUsed.selector, sharedNonce));
+        pprev.applyTx{value: REQ_ESCROW}(txID, sharedNonce, block.timestamp, sigA);
     }
 }

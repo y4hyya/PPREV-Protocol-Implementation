@@ -4,643 +4,339 @@ pragma solidity ^0.8.24;
 import "forge-std/Test.sol";
 import "../src/PPREVSingle.sol";
 
-/// @title PPREVSingleTest
-/// @notice End-to-end tests for the PPREV single-file MVP.
+/// @title PPREVSingle — Functional Tests
+/// @notice Happy-path lifecycle and basic revert coverage using MockNotaryVerifier.
 contract PPREVSingleTest is Test {
-    // ── Contracts ──
-    MockZKVerifier zkVerifier;
-    MockThresholdSignatureVerifier sigVerifier;
-    PPREVSingle protocol;
+    PPREVSingle internal pprev;
+    MockNotaryVerifier internal notary;
 
-    // ── Actors ──
-    address admin = address(this);
-    address lister = makeAddr("lister");
-    address applicant = makeAddr("applicant");
-    address anyone = makeAddr("anyone");
+    address internal admin = address(0xA0);
+    address internal listingOwner = address(0xB1);
+    address internal applicant = address(0xC2);
+    address internal otherApplicant = address(0xC3);
 
-    // ── Config ──
-    uint256 constant FRESHNESS_WINDOW = 300; // 5 minutes
-    uint256 constant EXPIRY_TIMEOUT = 3600; // 1 hour
-    uint256 constant MIN_COLLATERAL = 0.1 ether;
-    uint256 constant REQ_ESCROW = 0.05 ether;
+    bytes32 internal constant POLICY_R = keccak256("policy.ownership");
+    bytes32 internal constant POLICY_A = keccak256("policy.eligibility");
+    bytes32 internal constant POLICY_S = keccak256("policy.settlement");
 
-    // ── Fixtures ──
-    bytes32 constant AD_HASH = keccak256("test-ad-hash");
-    bytes32 constant POLICY_ID = keccak256("test-policy");
-    bytes32 constant TRANSCRIPT_COMMIT = keccak256("transcript-commitment");
-    bytes constant DUMMY_PROOF = hex"1234";
-    bytes constant DUMMY_SIG = hex"5678";
+    uint256 internal constant FRESHNESS = 300;
+    uint256 internal constant DEFAULT_LOCK = 7 days;
+    uint256 internal constant MIN_COLLATERAL = 1 ether;
+    uint256 internal constant REQ_ESCROW = 0.5 ether;
+
+    bytes internal constant DUMMY_SIG = hex"00";
 
     function setUp() public {
-        // Deploy mock verifiers
-        zkVerifier = new MockZKVerifier();
-        sigVerifier = new MockThresholdSignatureVerifier();
+        vm.startPrank(admin);
+        notary = new MockNotaryVerifier();
+        pprev = new PPREVSingle(address(notary), FRESHNESS, DEFAULT_LOCK, MIN_COLLATERAL);
+        pprev.whitelistPolicy(POLICY_R, true);
+        pprev.whitelistPolicy(POLICY_A, true);
+        pprev.whitelistPolicy(POLICY_S, true);
+        vm.stopPrank();
 
-        // Deploy protocol
-        protocol = new PPREVSingle(
-            address(zkVerifier), address(sigVerifier), FRESHNESS_WINDOW, EXPIRY_TIMEOUT, MIN_COLLATERAL
-        );
-
-        // Whitelist the test policy
-        protocol.whitelistPolicy(POLICY_ID, true);
-
-        // Fund actors
-        vm.deal(lister, 10 ether);
-        vm.deal(applicant, 10 ether);
-        vm.deal(anyone, 1 ether);
+        vm.deal(listingOwner, 100 ether);
+        vm.deal(applicant, 100 ether);
+        vm.deal(otherApplicant, 100 ether);
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Helper: build empty zkInputs array
-    // ════════════════════════════════════════════════════════════════════════
+    // ────────────────────────────────────────────────────────────────────────
+    //  Helpers
+    // ────────────────────────────────────────────────────────────────────────
 
-    function _emptyInputs() internal pure returns (bytes32[] memory) {
-        return new bytes32[](0);
+    function _computeTxId(bytes memory txData, bytes32 salt) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(txData, POLICY_R, salt));
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Full Happy Path (Register → Apply → Settle)
-    // ════════════════════════════════════════════════════════════════════════
-
-    function test_FullHappyPath() public {
-        bytes32 nonce1 = keccak256("nonce-register");
-        bytes32 nonce2 = keccak256("nonce-apply");
-        bytes32 nonce3 = keccak256("nonce-settle");
-
-        // ── Phase 1: Register listing ──
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
-
-        PPREVSingle.Listing memory listing = protocol.getListing(AD_HASH);
-        assertEq(uint256(listing.status), uint256(PPREVSingle.ListingStatus.ACTIVE));
-        assertEq(listing.owner, lister);
-        assertEq(listing.collateral, 0.1 ether);
-
-        // ── Phase 2: Application ──
-        vm.prank(applicant);
-        protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        // Derive expected appId
-        bytes32 expectedAppId = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
-
-        PPREVSingle.Application memory app = protocol.getApplication(expectedAppId);
-        assertEq(uint256(app.status), uint256(PPREVSingle.ApplicationStatus.PENDING_TRANSFER));
-        assertEq(app.applicant, applicant);
-        assertEq(app.escrowAmount, 0.05 ether);
-
-        // Listing should be LOCKED
-        listing = protocol.getListing(AD_HASH);
-        assertEq(uint256(listing.status), uint256(PPREVSingle.ListingStatus.LOCKED));
-
-        // ── Phase 3: Settlement ──
-        uint256 listerBalBefore = lister.balance;
-
-        vm.prank(lister);
-        protocol.settleListing(
-            expectedAppId, TRANSCRIPT_COMMIT, block.timestamp, nonce3, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        app = protocol.getApplication(expectedAppId);
-        assertEq(uint256(app.status), uint256(PPREVSingle.ApplicationStatus.SETTLED));
-
-        listing = protocol.getListing(AD_HASH);
-        assertEq(uint256(listing.status), uint256(PPREVSingle.ListingStatus.SETTLED));
-
-        // Lister should have received escrow (0.05) + collateral (0.1) = 0.15 ether
-        uint256 listerBalAfter = lister.balance;
-        assertEq(listerBalAfter - listerBalBefore, 0.15 ether);
-
-        // Struct fields should be zeroed after transfer
-        assertEq(listing.collateral, 0);
-        assertEq(app.escrowAmount, 0);
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Expiration Path
-    // ════════════════════════════════════════════════════════════════════════
-
-    function test_ExpirationPath() public {
-        bytes32 nonce1 = keccak256("nonce-register-exp");
-        bytes32 nonce2 = keccak256("nonce-apply-exp");
-
-        // Register
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
-
-        // Apply
-        vm.prank(applicant);
-        protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        bytes32 appId = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
-
-        // Cannot expire before timeout
-        vm.expectRevert();
-        vm.prank(anyone);
-        protocol.expireApplication(appId);
-
-        // Warp past expiry
-        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
-
-        uint256 applicantBalBefore = applicant.balance;
-
-        // Anyone can expire
-        vm.prank(anyone);
-        protocol.expireApplication(appId);
-
-        PPREVSingle.Application memory app = protocol.getApplication(appId);
-        assertEq(uint256(app.status), uint256(PPREVSingle.ApplicationStatus.EXPIRED));
-
-        // Listing should be ACTIVE again
-        PPREVSingle.Listing memory listing = protocol.getListing(AD_HASH);
-        assertEq(uint256(listing.status), uint256(PPREVSingle.ListingStatus.ACTIVE));
-
-        // Applicant should have received escrow + 10% slash of collateral
-        uint256 slashAmount = 0.01 ether; // 10% of 0.1 ether
-        uint256 applicantBalAfter = applicant.balance;
-        assertEq(applicantBalAfter - applicantBalBefore, 0.05 ether + slashAmount);
-
-        // Escrow field should be zeroed after transfer
-        assertEq(app.escrowAmount, 0);
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Revert — Duplicate nonce
-    // ════════════════════════════════════════════════════════════════════════
-
-    function test_RevertDuplicateNonce() public {
-        bytes32 nonce = keccak256("nonce-dup");
-
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
-
-        // Second listing with same nonce should revert
-        bytes32 adHash2 = keccak256("ad-hash-2");
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.NonceAlreadyUsed.selector, nonce));
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            adHash2,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+    function _register(address owner_, bytes memory txData, bytes32 salt, bytes32 nonce)
+        internal
+        returns (bytes32 txID)
+    {
+        vm.prank(owner_);
+        txID = pprev.register{value: MIN_COLLATERAL}(
+            txData, POLICY_R, POLICY_A, POLICY_S, salt, REQ_ESCROW, nonce, block.timestamp, DUMMY_SIG
         );
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Revert — Insufficient collateral
-    // ════════════════════════════════════════════════════════════════════════
+    function _applyTx(address who, bytes32 txID, bytes32 nonce) internal returns (bytes32 appId) {
+        vm.prank(who);
+        appId = pprev.applyTx{value: REQ_ESCROW}(txID, nonce, block.timestamp, DUMMY_SIG);
+    }
 
-    function test_RevertInsufficientCollateral() public {
-        bytes32 nonce = keccak256("nonce-low-col");
+    function _engage(address owner_, bytes32 appId, uint256 lockWindow) internal returns (bytes32 engId) {
+        vm.prank(owner_);
+        engId = pprev.engage(appId, lockWindow);
+    }
 
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.InsufficientCollateral.selector, 0.01 ether, MIN_COLLATERAL));
-        vm.prank(lister);
-        protocol.registerListing{value: 0.01 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+    function _settle(address owner_, bytes32 engId, bytes32 nonce) internal {
+        vm.prank(owner_);
+        pprev.settle(engId, nonce, block.timestamp, DUMMY_SIG);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    //  Functional Tests
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// 1) Register happy path
+    function test_Register_Succeeds() public {
+        bytes memory txData = abi.encode("listing#1", uint256(1500));
+        bytes32 salt = bytes32(uint256(1));
+        bytes32 txID = _register(listingOwner, txData, salt, bytes32(uint256(101)));
+
+        PPREVSingle.Listing memory l = pprev.getListing(txID);
+        assertEq(l.owner, listingOwner);
+        assertEq(l.policyId_R, POLICY_R);
+        assertEq(l.policyId_A, POLICY_A);
+        assertEq(l.policyId_S, POLICY_S);
+        assertEq(l.reqEscrow, REQ_ESCROW);
+        assertEq(l.collateral, MIN_COLLATERAL);
+        assertEq(uint256(l.state), uint256(PPREVSingle.TxState.ACTIVE));
+        assertEq(l.txID, _computeTxId(txData, salt));
+        assertTrue(pprev.isNonceUsed(bytes32(uint256(101))));
+    }
+
+    /// 2) Register reverts on duplicate C_tx
+    function test_Register_Reverts_OnDuplicate() public {
+        bytes memory txData = abi.encode("listing#1");
+        bytes32 salt = bytes32(uint256(7));
+        bytes32 txID = _register(listingOwner, txData, salt, bytes32(uint256(1)));
+
+        vm.prank(listingOwner);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.TxAlreadyExists.selector, txID));
+        pprev.register{value: MIN_COLLATERAL}(
+            txData, POLICY_R, POLICY_A, POLICY_S, salt, REQ_ESCROW, bytes32(uint256(2)), block.timestamp, DUMMY_SIG
         );
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Revert — Freshness window exceeded
-    // ════════════════════════════════════════════════════════════════════════
-
-    function test_RevertFreshnessExceeded() public {
-        // Warp to a realistic timestamp so subtraction doesn't underflow
-        vm.warp(1_700_000_000);
-
-        bytes32 nonce = keccak256("nonce-stale");
-        uint256 staleTimestamp = block.timestamp - FRESHNESS_WINDOW - 1;
-
-        vm.expectRevert();
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            staleTimestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Revert — Non-whitelisted policy
-    // ════════════════════════════════════════════════════════════════════════
-
-    function test_RevertNonWhitelistedPolicy() public {
-        bytes32 nonce = keccak256("nonce-bad-policy");
-        bytes32 badPolicy = keccak256("unknown-policy");
-
+    /// 3) Register reverts on non-whitelisted policy
+    function test_Register_Reverts_OnUnwhitelistedPolicy() public {
+        bytes32 badPolicy = keccak256("policy.unknown");
+        vm.prank(listingOwner);
         vm.expectRevert(abi.encodeWithSelector(PPREVSingle.PolicyNotWhitelisted.selector, badPolicy));
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
+        pprev.register{value: MIN_COLLATERAL}(
+            abi.encode("x"),
             badPolicy,
+            POLICY_A,
+            POLICY_S,
+            bytes32(uint256(1)),
             REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
+            bytes32(uint256(11)),
             block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
             DUMMY_SIG
         );
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Revert — Settlement by non-owner
-    // ════════════════════════════════════════════════════════════════════════
-
-    function test_RevertSettlementByNonOwner() public {
-        bytes32 nonce1 = keccak256("nonce-reg-auth");
-        bytes32 nonce2 = keccak256("nonce-app-auth");
-        bytes32 nonce3 = keccak256("nonce-settle-auth");
-
-        // Register
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
+    /// 4) Register reverts on insufficient collateral
+    function test_Register_Reverts_OnInsufficientCollateral() public {
+        vm.prank(listingOwner);
+        vm.expectRevert(
+            abi.encodeWithSelector(PPREVSingle.InsufficientCollateral.selector, MIN_COLLATERAL - 1, MIN_COLLATERAL)
+        );
+        pprev.register{value: MIN_COLLATERAL - 1}(
+            abi.encode("x"),
+            POLICY_R,
+            POLICY_A,
+            POLICY_S,
+            bytes32(uint256(1)),
             REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
+            bytes32(uint256(12)),
             block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
             DUMMY_SIG
-        );
-
-        // Apply
-        vm.prank(applicant);
-        protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        bytes32 appId = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
-
-        // Non-owner tries to settle
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.CallerNotListingOwner.selector, anyone, lister));
-        vm.prank(anyone);
-        protocol.settleListing(
-            appId, TRANSCRIPT_COMMIT, block.timestamp, nonce3, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
         );
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Revert — Cannot apply to own listing
-    // ════════════════════════════════════════════════════════════════════════
+    /// 5) Apply happy path
+    function test_Apply_Succeeds() public {
+        bytes32 txID = _register(listingOwner, abi.encode("a"), bytes32(uint256(1)), bytes32(uint256(20)));
+        bytes32 appId = _applyTx(applicant, txID, bytes32(uint256(21)));
 
-    function test_RevertApplyToOwnListing() public {
-        bytes32 nonce1 = keccak256("nonce-reg-self");
-        bytes32 nonce2 = keccak256("nonce-app-self");
+        PPREVSingle.Application memory a = pprev.getApplication(appId);
+        assertEq(a.applicant, applicant);
+        assertEq(a.txID, txID);
+        assertEq(a.escrow, REQ_ESCROW);
+        assertEq(uint256(a.status), uint256(PPREVSingle.AppStatus.PENDING));
 
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
+        // Listing stays ACTIVE — engagement is a separate step
+        PPREVSingle.Listing memory l = pprev.getListing(txID);
+        assertEq(uint256(l.state), uint256(PPREVSingle.TxState.ACTIVE));
+    }
 
-        // Lister tries to apply to their own listing
+    /// 6) Apply by listing owner is rejected
+    function test_Apply_Reverts_WhenOwnerApplies() public {
+        bytes32 txID = _register(listingOwner, abi.encode("b"), bytes32(uint256(1)), bytes32(uint256(30)));
+
+        vm.prank(listingOwner);
         vm.expectRevert(PPREVSingle.CannotApplyToOwnListing.selector);
-        vm.prank(lister);
-        protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
+        pprev.applyTx{value: REQ_ESCROW}(txID, bytes32(uint256(31)), block.timestamp, DUMMY_SIG);
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Revert — Settle after expiry uses dedicated error
-    // ════════════════════════════════════════════════════════════════════════
-
-    function test_RevertSettleAfterExpiry() public {
-        bytes32 nonce1 = keccak256("nonce-reg-expire-settle");
-        bytes32 nonce2 = keccak256("nonce-app-expire-settle");
-        bytes32 nonce3 = keccak256("nonce-settle-expire-settle");
-
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
+    /// 7) Apply rejected on insufficient escrow
+    function test_Apply_Reverts_OnInsufficientEscrow() public {
+        bytes32 txID = _register(listingOwner, abi.encode("c"), bytes32(uint256(1)), bytes32(uint256(40)));
 
         vm.prank(applicant);
-        protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        bytes32 appId = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
-
-        // Warp past expiry
-        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
-
-        // Settle should revert with ApplicationExpiredCannotSettle, not ApplicationNotPending
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ApplicationExpiredCannotSettle.selector, appId));
-        vm.prank(lister);
-        protocol.settleListing(
-            appId, TRANSCRIPT_COMMIT, block.timestamp, nonce3, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.InsufficientEscrow.selector, REQ_ESCROW - 1, REQ_ESCROW));
+        pprev.applyTx{value: REQ_ESCROW - 1}(txID, bytes32(uint256(41)), block.timestamp, DUMMY_SIG);
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Cancel Listing
-    // ════════════════════════════════════════════════════════════════════════
-
-    function test_CancelListing() public {
-        bytes32 nonce = keccak256("nonce-cancel");
-
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
-
-        uint256 listerBalBefore = lister.balance;
-
-        vm.prank(lister);
-        protocol.cancelListing(AD_HASH);
-
-        PPREVSingle.Listing memory listing = protocol.getListing(AD_HASH);
-        assertEq(uint256(listing.status), uint256(PPREVSingle.ListingStatus.CANCELLED));
-
-        // Collateral should be returned
-        uint256 listerBalAfter = lister.balance;
-        assertEq(listerBalAfter - listerBalBefore, 0.1 ether);
-
-        // Collateral field should be zeroed
-        assertEq(listing.collateral, 0);
-    }
-
-    function test_RevertCancelNotOwner() public {
-        bytes32 nonce = keccak256("nonce-cancel-notown");
-
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
-
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.CallerNotListingOwner.selector, anyone, lister));
-        vm.prank(anyone);
-        protocol.cancelListing(AD_HASH);
-    }
-
-    function test_RevertCancelLockedListing() public {
-        bytes32 nonce1 = keccak256("nonce-cancel-locked1");
-        bytes32 nonce2 = keccak256("nonce-cancel-locked2");
-
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
+    /// 8) Apply rejected on duplicate pending application by same applicant
+    function test_Apply_Reverts_OnDuplicateApplication() public {
+        bytes32 txID = _register(listingOwner, abi.encode("d"), bytes32(uint256(1)), bytes32(uint256(50)));
+        bytes32 appId = _applyTx(applicant, txID, bytes32(uint256(51)));
 
         vm.prank(applicant);
-        protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.ListingNotActive.selector, AD_HASH));
-        vm.prank(lister);
-        protocol.cancelListing(AD_HASH);
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.DuplicateApplication.selector, appId));
+        pprev.applyTx{value: REQ_ESCROW}(txID, bytes32(uint256(52)), block.timestamp, DUMMY_SIG);
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Slashing reduces collateral
-    // ════════════════════════════════════════════════════════════════════════
+    /// 9) Engage happy path: listing → LOCKED, app → ENGAGED, engagement recorded
+    function test_Engage_Succeeds() public {
+        bytes32 txID = _register(listingOwner, abi.encode("e"), bytes32(uint256(1)), bytes32(uint256(60)));
+        bytes32 appId = _applyTx(applicant, txID, bytes32(uint256(61)));
 
-    function test_SlashReducesCollateral() public {
-        bytes32 nonce1 = keccak256("nonce-reg-slash");
-        bytes32 nonce2 = keccak256("nonce-app-slash");
+        bytes32 engId = _engage(listingOwner, appId, 0);
 
-        // Register
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
+        PPREVSingle.Listing memory l = pprev.getListing(txID);
+        PPREVSingle.Application memory a = pprev.getApplication(appId);
+        PPREVSingle.Engagement memory e = pprev.getEngagement(engId);
+
+        assertEq(uint256(l.state), uint256(PPREVSingle.TxState.LOCKED));
+        assertEq(uint256(a.status), uint256(PPREVSingle.AppStatus.ENGAGED));
+        assertEq(uint256(e.status), uint256(PPREVSingle.EngStatus.ACTIVE));
+        assertEq(e.txID, txID);
+        assertEq(e.appId, appId);
+        assertEq(e.expiresAt, block.timestamp + DEFAULT_LOCK);
+    }
+
+    /// 10) Engage rejected when caller is not listing owner
+    function test_Engage_Reverts_WhenNotOwner() public {
+        bytes32 txID = _register(listingOwner, abi.encode("f"), bytes32(uint256(1)), bytes32(uint256(70)));
+        bytes32 appId = _applyTx(applicant, txID, bytes32(uint256(71)));
+
+        vm.prank(otherApplicant);
+        vm.expectRevert(
+            abi.encodeWithSelector(PPREVSingle.CallerNotListingOwner.selector, otherApplicant, listingOwner)
         );
+        pprev.engage(appId, 0);
+    }
 
-        // Apply
+    /// 11) Settle happy path
+    function test_Settle_Succeeds() public {
+        bytes32 txID = _register(listingOwner, abi.encode("g"), bytes32(uint256(1)), bytes32(uint256(80)));
+        bytes32 appId = _applyTx(applicant, txID, bytes32(uint256(81)));
+        bytes32 engId = _engage(listingOwner, appId, 0);
+
+        _settle(listingOwner, engId, bytes32(uint256(82)));
+
+        PPREVSingle.Listing memory l = pprev.getListing(txID);
+        PPREVSingle.Engagement memory e = pprev.getEngagement(engId);
+        assertEq(uint256(l.state), uint256(PPREVSingle.TxState.SETTLED));
+        assertEq(uint256(e.status), uint256(PPREVSingle.EngStatus.SETTLED));
+    }
+
+    /// 12) Settle accounting: owner receives escrow + collateral; applicant pays escrow
+    function test_Settle_TransfersEscrowAndCollateral() public {
+        uint256 ownerStart = listingOwner.balance;
+        uint256 applicantStart = applicant.balance;
+
+        bytes32 txID = _register(listingOwner, abi.encode("h"), bytes32(uint256(1)), bytes32(uint256(90)));
+        bytes32 appId = _applyTx(applicant, txID, bytes32(uint256(91)));
+        bytes32 engId = _engage(listingOwner, appId, 0);
+        _settle(listingOwner, engId, bytes32(uint256(92)));
+
+        assertEq(listingOwner.balance, ownerStart + REQ_ESCROW); // -collateral + collateral + escrow
+        assertEq(applicant.balance, applicantStart - REQ_ESCROW);
+    }
+
+    /// 13) Expire happy path: status transitions, escrow + slash transferred to applicant
+    function test_Expire_Succeeds() public {
+        bytes32 txID = _register(listingOwner, abi.encode("i"), bytes32(uint256(1)), bytes32(uint256(100)));
+        bytes32 appId = _applyTx(applicant, txID, bytes32(uint256(101)));
+        bytes32 engId = _engage(listingOwner, appId, 0);
+
+        vm.warp(block.timestamp + DEFAULT_LOCK + 1);
+        pprev.expire(engId);
+
+        PPREVSingle.Listing memory l = pprev.getListing(txID);
+        PPREVSingle.Engagement memory e = pprev.getEngagement(engId);
+        PPREVSingle.Application memory a = pprev.getApplication(appId);
+
+        assertEq(uint256(e.status), uint256(PPREVSingle.EngStatus.EXPIRED));
+        assertEq(uint256(a.status), uint256(PPREVSingle.AppStatus.EXPIRED));
+        assertEq(uint256(l.state), uint256(PPREVSingle.TxState.ACTIVE)); // ready for next applicant
+        assertEq(l.expirationCount, 1);
+        assertEq(l.collateral, MIN_COLLATERAL - MIN_COLLATERAL / 10);
+    }
+
+    /// 14) Expire economics: applicant receives escrow + 10% of collateral
+    function test_Expire_SlashesCollateral_AndReturnsEscrow() public {
+        uint256 applicantStart = applicant.balance;
+
+        bytes32 txID = _register(listingOwner, abi.encode("j"), bytes32(uint256(1)), bytes32(uint256(110)));
+        bytes32 appId = _applyTx(applicant, txID, bytes32(uint256(111)));
+        bytes32 engId = _engage(listingOwner, appId, 0);
+
+        vm.warp(block.timestamp + DEFAULT_LOCK + 1);
+        pprev.expire(engId);
+
+        // applicant paid REQ_ESCROW then got back REQ_ESCROW + 10% of MIN_COLLATERAL
+        assertEq(applicant.balance, applicantStart + MIN_COLLATERAL / 10);
+    }
+
+    /// 15) Cancel happy path: collateral returned, state CANCELLED
+    function test_Cancel_Succeeds() public {
+        uint256 ownerStart = listingOwner.balance;
+        bytes32 txID = _register(listingOwner, abi.encode("k"), bytes32(uint256(1)), bytes32(uint256(120)));
+
+        vm.prank(listingOwner);
+        pprev.cancel(txID);
+
+        PPREVSingle.Listing memory l = pprev.getListing(txID);
+        assertEq(uint256(l.state), uint256(PPREVSingle.TxState.CANCELLED));
+        assertEq(l.collateral, 0);
+        assertEq(listingOwner.balance, ownerStart);
+    }
+
+    /// 16) Max expirations auto-cancels the listing; remaining collateral returned to owner
+    function test_MaxExpirations_AutoCancelsListing() public {
+        bytes32 txID = _register(listingOwner, abi.encode("m"), bytes32(uint256(1)), bytes32(uint256(200)));
+
+        bytes32 appId;
+        bytes32 engId;
+
+        appId = _applyTx(applicant, txID, bytes32(uint256(300)));
+        engId = _engage(listingOwner, appId, 0);
+        vm.warp(block.timestamp + DEFAULT_LOCK + 1);
+        pprev.expire(engId);
+
+        appId = _applyTx(applicant, txID, bytes32(uint256(301)));
+        engId = _engage(listingOwner, appId, 0);
+        vm.warp(block.timestamp + DEFAULT_LOCK + 1);
+        pprev.expire(engId);
+
+        appId = _applyTx(applicant, txID, bytes32(uint256(302)));
+        engId = _engage(listingOwner, appId, 0);
+        vm.warp(block.timestamp + DEFAULT_LOCK + 1);
+        pprev.expire(engId);
+
+        appId = _applyTx(applicant, txID, bytes32(uint256(303)));
+        engId = _engage(listingOwner, appId, 0);
+        vm.warp(block.timestamp + DEFAULT_LOCK + 1);
+        pprev.expire(engId);
+
+        appId = _applyTx(applicant, txID, bytes32(uint256(304)));
+        engId = _engage(listingOwner, appId, 0);
+        vm.warp(block.timestamp + DEFAULT_LOCK + 1);
+        pprev.expire(engId);
+
+        PPREVSingle.Listing memory l = pprev.getListing(txID);
+        assertEq(uint256(l.state), uint256(PPREVSingle.TxState.CANCELLED));
+        assertEq(l.expirationCount, 5);
+        assertEq(l.collateral, 0);
+
+        // Further applications now fail
         vm.prank(applicant);
-        protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        // Warp past expiry
-        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
-
-        bytes32 appId = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
-        vm.prank(anyone);
-        protocol.expireApplication(appId);
-
-        // Collateral should be reduced by 10%
-        PPREVSingle.Listing memory listing = protocol.getListing(AD_HASH);
-        assertEq(listing.collateral, 0.09 ether); // 0.1 - 0.01
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Admin functions
-    // ════════════════════════════════════════════════════════════════════════
-
-    function test_AdminFunctions() public {
-        // Only owner should be able to call admin functions
-        vm.prank(anyone);
-        vm.expectRevert(PPREVSingle.NotOwner.selector);
-        protocol.setMinCollateral(0.5 ether);
-
-        // Owner can update config
-        protocol.setMinCollateral(0.5 ether);
-        assertEq(protocol.minCollateral(), 0.5 ether);
-
-        protocol.setFreshnessWindow(600);
-        assertEq(protocol.freshnessWindow(), 600);
-
-        protocol.setExpiryTimeout(7200);
-        assertEq(protocol.expiryTimeout(), 7200);
-
-        protocol.setMaxExpirations(10);
-        assertEq(protocol.maxExpirations(), 10);
-
-        // Whitelist / un-whitelist
-        bytes32 newPolicy = keccak256("new-policy");
-        protocol.whitelistPolicy(newPolicy, true);
-        assertTrue(protocol.isPolicyWhitelisted(newPolicy));
-
-        protocol.whitelistPolicy(newPolicy, false);
-        assertFalse(protocol.isPolicyWhitelisted(newPolicy));
-
-        // Zero-address verifiers should revert
-        vm.expectRevert(PPREVSingle.InvalidVerifierAddress.selector);
-        protocol.setZKVerifier(address(0));
-
-        vm.expectRevert(PPREVSingle.InvalidVerifierAddress.selector);
-        protocol.setThresholdVerifier(address(0));
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Max expirations auto-cancels listing
-    // ════════════════════════════════════════════════════════════════════════
-
-    function test_MaxExpirationsAutoCancels() public {
-        // Set maxExpirations to 2 for faster test
-        protocol.setMaxExpirations(2);
-
-        bytes32 nonce1 = keccak256("nonce-maxexp-reg");
-
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH,
-            POLICY_ID,
-            REQ_ESCROW,
-            TRANSCRIPT_COMMIT,
-            block.timestamp,
-            nonce1,
-            DUMMY_PROOF,
-            _emptyInputs(),
-            DUMMY_SIG
-        );
-
-        // ── Cycle 1: apply → expire ──
-        bytes32 nonce2 = keccak256("nonce-maxexp-app1");
-        vm.prank(applicant);
-        protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce2, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
-        bytes32 appId1 = keccak256(abi.encodePacked(AD_HASH, applicant, nonce2));
-        vm.prank(anyone);
-        protocol.expireApplication(appId1);
-
-        // After 1st expiration: listing should still be ACTIVE
-        PPREVSingle.Listing memory listing1 = protocol.getListing(AD_HASH);
-        assertEq(uint256(listing1.status), uint256(PPREVSingle.ListingStatus.ACTIVE));
-
-        // ── Cycle 2: apply → expire (should auto-cancel) ──
-        bytes32 nonce3 = keccak256("nonce-maxexp-app2");
-        vm.prank(applicant);
-        protocol.applyToListing{value: 0.05 ether}(
-            AD_HASH, POLICY_ID, TRANSCRIPT_COMMIT, block.timestamp, nonce3, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
-
-        vm.warp(block.timestamp + EXPIRY_TIMEOUT + 1);
-        bytes32 appId2 = keccak256(abi.encodePacked(AD_HASH, applicant, nonce3));
-
-        uint256 listerBalBefore = lister.balance;
-        vm.prank(anyone);
-        protocol.expireApplication(appId2);
-
-        // After 2nd expiration: listing should be CANCELLED
-        PPREVSingle.Listing memory listing2 = protocol.getListing(AD_HASH);
-        assertEq(uint256(listing2.status), uint256(PPREVSingle.ListingStatus.CANCELLED));
-        // Remaining collateral should be zero (returned to owner)
-        assertEq(listing2.collateral, 0);
-
-        // Lister should have received remaining collateral
-        uint256 listerBalAfter = lister.balance;
-        assertTrue(listerBalAfter > listerBalBefore);
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    //  Test: Revert on zero reqEscrow
-    // ════════════════════════════════════════════════════════════════════════
-
-    function test_RevertZeroReqEscrow() public {
-        bytes32 nonce = keccak256("nonce-zero-escrow");
-
-        vm.expectRevert(PPREVSingle.InvalidEscrowAmount.selector);
-        vm.prank(lister);
-        protocol.registerListing{value: 0.1 ether}(
-            AD_HASH, POLICY_ID, 0, TRANSCRIPT_COMMIT, block.timestamp, nonce, DUMMY_PROOF, _emptyInputs(), DUMMY_SIG
-        );
+        vm.expectRevert(abi.encodeWithSelector(PPREVSingle.TxNotActive.selector, txID));
+        pprev.applyTx{value: REQ_ESCROW}(txID, bytes32(uint256(999)), block.timestamp, DUMMY_SIG);
     }
 }
